@@ -1,33 +1,20 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import "./responsive.css";
 
 /**
- * SOP Checklist App — Submissions + Manager per-task review (Responsive)
- * - JavaScript only, no extra deps
- * - Employee: Today (do work) + Review Queue (fix rework)
- * - Manager: Per-task selection (approve / rework), shows photos/notes/values
+ * SOP Checklist App — Responsive + Theme (JS only)
  */
 
-// ---------------------- Inline Styles ----------------------
+// ---------------------- Inline Styles (kept minimal) ----------------------
 const S = {
-  page: { fontFamily: "Inter, system-ui, Arial", color: "#0f172a", background: "#f8fafc", minHeight: "100vh" },
-  container: { maxWidth: 1080, margin: "0 auto", padding: 16 },
-  header: { position: "sticky", top: 0, zIndex: 10, background: "rgba(255,255,255,0.9)", backdropFilter: "saturate(1.2) blur(6px)", borderBottom: "1px solid #e2e8f0" },
-  headerInner: { maxWidth: 1080, margin: "0 auto", padding: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  badge: (active) => ({ padding: "6px 12px", borderRadius: 999, border: "1px solid #cbd5e1", background: active ? "#0f172a" : "white", color: active ? "white" : "#0f172a", cursor: "pointer" }),
-  select: { marginLeft: 8, border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 8px" },
+  page: { fontFamily: "Inter, system-ui, Arial" },
   h1: { fontSize: 22, fontWeight: 600, margin: "16px 0" },
   h2: { fontSize: 18, fontWeight: 600, margin: "8px 0" },
-  card: { background: "white", border: "1px solid #e2e8f0", borderRadius: 16, padding: 16, boxShadow: "0 1px 2px rgba(0,0,0,0.04)" },
-  btn: { padding: "8px 12px", borderRadius: 10, border: "1px solid #cbd5e1", background: "white", cursor: "pointer" },
-  btnPrimary: { padding: "8px 12px", borderRadius: 10, border: "1px solid #0f172a", background: "#0f172a", color: "white", cursor: "pointer" },
-  grid2: { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" },
-  input: { border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 8px" },
-  tag: { fontSize: 12, padding: "2px 8px", border: "1px solid #cbd5e1", borderRadius: 999, background: "#f1f5f9", marginRight: 6 },
-  row: { display: "flex", alignItems: "center", gap: 8 },
+  card: { borderRadius: 16, padding: 16 },
+  input: {},
   table: { width: "100%", borderCollapse: "collapse", fontSize: 14 },
-  th: { textAlign: "left", borderBottom: "1px solid #e2e8f0", padding: 6 },
-  td: { borderBottom: "1px solid #f1f5f9", padding: 6, verticalAlign: "top" },
+  th: { textAlign: "left", borderBottom: "1px solid var(--border)", padding: 6 },
+  td: { borderBottom: "1px solid var(--border)", padding: 6, verticalAlign: "top" },
 };
 
 // ---------------------- Mock Data ----------------------
@@ -47,7 +34,7 @@ const MOCK_TASKLISTS = [
     locationId: "loc_001",
     name: "Open — FOH",
     timeBlockId: "open",
-    recurrence: [0, 1, 2, 3, 4, 5, 6],
+    recurrence: [0,1,2,3,4,5,6],
     requiresApproval: true,
     signoffMethod: "PIN",
     tasks: [
@@ -61,7 +48,7 @@ const MOCK_TASKLISTS = [
     locationId: "loc_001",
     name: "Close — BOH",
     timeBlockId: "close",
-    recurrence: [0, 1, 2, 3, 4, 5, 6],
+    recurrence: [0,1,2,3,4,5,6],
     requiresApproval: true,
     signoffMethod: "PIN",
     tasks: [
@@ -105,13 +92,27 @@ export default function App() {
   const [mode, setMode] = useState("employee");
   const [activeLocationId, setActiveLocationId] = useState("loc_001");
 
+  // Theme (auto detect + toggle + persist)
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved) return saved;
+    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+    return prefersDark ? "dark" : "light";
+  });
+  useEffect(() => {
+    localStorage.setItem("theme", theme);
+    document.documentElement.classList.toggle("theme-dark", theme === "dark");
+    document.documentElement.classList.toggle("theme-light", theme === "light");
+  }, [theme]);
+  const themeClass = theme === "dark" ? "theme-dark" : "theme-light";
+
   // Today’s tasklists
   const tasklistsToday = useMemo(() => {
     const dow = new Date().getDay();
     return MOCK_TASKLISTS.filter((tl) => tl.locationId === activeLocationId && tl.recurrence.includes(dow));
   }, [activeLocationId]);
 
-  // Employee working state per tasklist (not yet submitted)
+  // Working state
   const [working, setWorking] = useState(() =>
     tasklistsToday.reduce((acc, tl) => {
       acc[tl.id] = tl.tasks.map((t) => ({
@@ -122,14 +123,14 @@ export default function App() {
     }, {})
   );
 
-  // Submissions list (what managers review)
+  // Submissions
   const [submissions, setSubmissions] = useState([]);
 
-  // PIN modal for signoff
+  // PIN modal
   const [pinModal, setPinModal] = useState({ open: false, onConfirm: null });
 
-  // Ensure working state exists for new location/day
-  React.useEffect(() => {
+  // Ensure working state exists for visible lists
+  useEffect(() => {
     setWorking((prev) => {
       const next = { ...prev };
       tasklistsToday.forEach((tl) => {
@@ -183,7 +184,7 @@ export default function App() {
     setPinModal({
       open: true,
       onConfirm: (pin) => {
-        const payload = working[tl.id].map(t => ({ ...t, reviewStatus: "Pending" })); // keep progress
+        const payload = working[tl.id].map(t => ({ ...t, reviewStatus: "Pending" }));
         const submission = {
           id: `ci_${Date.now()}`,
           tasklistId: tl.id,
@@ -196,13 +197,10 @@ export default function App() {
           tasks: payload,
         };
         setSubmissions((prev) => [submission, ...prev]);
-
-        // Mark tasks as pending review in the working copy (do NOT reset anything).
         setWorking((prev) => ({
           ...prev,
           [tl.id]: prev[tl.id].map(t => ({ ...t, reviewStatus: "Pending" })),
         }));
-
         setPinModal({ open: false, onConfirm: null });
         alert("Submitted for manager review.");
       },
@@ -210,29 +208,41 @@ export default function App() {
   }
 
   return (
-    <div style={S.page}>
-      {/* Responsive Header */}
+    <div className={`app-page ${themeClass}`} style={S.page}>
+      {/* Header */}
       <div className="app-header">
         <div className="app-header-inner">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 8, background: MOCK_COMPANY.brand.primary }} />
+            <div className="brand-dot" />
             <div style={{ fontWeight: 600 }}>{MOCK_COMPANY.name}</div>
           </div>
+
           <div className="app-header-actions">
             {["employee", "manager", "admin"].map((m) => (
-              <button key={m} onClick={() => setMode(m)} style={S.badge(mode === m)} className="r-btn">
+              <button key={m} onClick={() => setMode(m)} className={`u-btn ${mode === m ? "is-active" : ""}`} style={{ borderColor: mode === m ? "var(--text)" : undefined }}>
                 {m[0].toUpperCase() + m.slice(1)}
               </button>
             ))}
-            <select className="r-input" style={S.select} value={activeLocationId} onChange={(e) => setActiveLocationId(e.target.value)}>
+
+            <select className="u-input" value={activeLocationId} onChange={(e) => setActiveLocationId(e.target.value)}>
               {MOCK_LOCATIONS.map((l) => (
                 <option key={l.id} value={l.id}>{l.name}</option>
               ))}
             </select>
+
+            <button
+              className="u-btn"
+              aria-label="Toggle theme"
+              title="Toggle theme"
+              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+            >
+              {theme === "dark" ? "🌞 Light" : "🌙 Dark"}
+            </button>
           </div>
         </div>
       </div>
 
+      {/* Main */}
       <main className="app-container">
         {mode === "employee" && (
           <EmployeeView
@@ -266,7 +276,6 @@ export default function App() {
 
 // ---------------------- Employee ----------------------
 function EmployeeView({ tasklists, working, updateTaskState, handleComplete, handleUpload, signoff, submissions, setSubmissions, setWorking }) {
-  // helper must live here so it can see props
   function mirrorReworkPendingToWorking(submissionId) {
     const sub = submissions.find(x => x.id === submissionId);
     if (!sub) return;
@@ -280,8 +289,9 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
   }
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div className="r-grid" style={{ gap: 16 }}>
       <h1 style={S.h1}>Today</h1>
+
       {tasklists.map((tl) => {
         const states = working[tl.id];
         const total = tl.tasks.length;
@@ -292,14 +302,16 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
         });
 
         return (
-          <div key={tl.id} style={S.card} className="card-pad-tight">
+          <div key={tl.id} className="u-card elevated card-pad-tight" style={S.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
               <div>
                 <div style={{ fontWeight: 600 }}>{tl.name}</div>
-                <div style={{ fontSize: 12, color: "#475569" }}>{getTimeBlockLabel(tl.timeBlockId)}</div>
-                <div style={{ marginTop: 6 }}><span style={S.tag}>Progress: {done}/{total} ({pct(done, total)}%)</span></div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>{getTimeBlockLabel(tl.timeBlockId)}</div>
+                <div style={{ marginTop: 6 }}>
+                  <span className="tag">Progress: {done}/{total} ({pct(done, total)}%)</span>
+                </div>
               </div>
-              <button className="r-btn" style={{ ...S.btnPrimary, opacity: canSubmit ? 1 : 0.5 }} onClick={() => signoff(tl)} disabled={!canSubmit}>
+              <button className="u-btnPrimary" style={{ opacity: canSubmit ? 1 : 0.5 }} onClick={() => signoff(tl)} disabled={!canSubmit}>
                 Sign & Submit
               </button>
             </div>
@@ -311,33 +323,35 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                 const canComplete = canTaskBeCompleted(task, state);
 
                 return (
-                  <div key={task.id} style={{ ...S.card, borderRadius: 12, borderColor: isComplete ? "#10b981" : "#e2e8f0", background: isComplete ? "#ecfdf5" : "white" }} className="card-pad-tight">
+                  <div
+                    key={task.id}
+                    className="u-card card-pad-tight"
+                    style={{
+                      ...S.card,
+                      borderRadius: 12,
+                      borderColor: isComplete ? "var(--ok)" : "var(--border)",
+                      background: isComplete ? "color-mix(in oklab, var(--ok) 10%, var(--surface))" : "var(--surface)"
+                    }}
+                  >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span aria-hidden style={{
                           width: 22, height: 22, borderRadius: 999, display: "inline-flex", alignItems: "center",
-                          justifyContent: "center", fontSize: 14, fontWeight: 700, color: isComplete ? "#065f46" : "#94a3b8",
-                          background: isComplete ? "#a7f3d0" : "#f1f5f9", border: `1px solid ${isComplete ? "#10b981" : "#e2e8f0"}`
+                          justifyContent: "center", fontSize: 14, fontWeight: 700,
+                          color: isComplete ? "#065f46" : "var(--muted)",
+                          background: isComplete ? "color-mix(in oklab, var(--ok) 35%, var(--surface))" : "var(--surface-soft)",
+                          border: `1px solid ${isComplete ? "var(--ok)" : "var(--border)"}`
                         }}>{isComplete ? "✓" : "•"}</span>
                         <div>
-                          <div style={{ fontWeight: 600, color: isComplete ? "#065f46" : "#0f172a" }}>{task.title}</div>
-                          <div style={{ fontSize: 12, color: isComplete ? "#065f46" : "#475569" }}>
+                          <div style={{ fontWeight: 600, color: isComplete ? "#065f46" : "var(--text)" }}>{task.title}</div>
+                          <div style={{ fontSize: 12, color: isComplete ? "#065f46" : "var(--muted)" }}>
                             {task.category} • {task.inputType}{task.photoRequired ? " • Photo required" : ""}{task.noteRequired ? " • Note required" : ""}
                           </div>
 
-                          {/* Manager review badge */}
                           {state.reviewStatus && (
                             <div style={{ marginTop: 6 }}>
                               <span
-                                style={{
-                                  ...S.tag,
-                                  borderColor:
-                                    state.reviewStatus === "Approved" ? "#10b981" :
-                                    state.reviewStatus === "Rework" ? "#f59e0b" : "#94a3b8",
-                                  color:
-                                    state.reviewStatus === "Approved" ? "#065f46" :
-                                    state.reviewStatus === "Rework" ? "#8a5a00" : "#475569",
-                                }}
+                                className={`tag ${state.reviewStatus === "Approved" ? "ok" : state.reviewStatus === "Rework" ? "warn" : ""}`}
                                 title="Manager review status"
                               >
                                 {state.reviewStatus}
@@ -351,9 +365,9 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                         {task.inputType === "number" && (
                           <input
                             type="number"
-                            className="r-input"
+                            className="u-input"
                             placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
-                            style={{ ...S.input, minWidth: 80, maxWidth: 140, background: isComplete ? "#f0fdf4" : "white" }}
+                            style={{ minWidth: 80, maxWidth: 140, background: isComplete ? "color-mix(in oklab, var(--ok) 12%, var(--surface))" : "var(--surface)" }}
                             value={state.value ?? ""}
                             onChange={(e) => updateTaskState(tl.id, task.id, { value: Number(e.target.value) })}
                             disabled={isComplete}
@@ -361,12 +375,11 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                         )}
 
                         <button
-                          className="r-btn"
+                          className="u-btn"
                           style={{
-                            ...S.btn,
-                            borderColor: isComplete ? "#10b981" : canComplete ? "#0f172a" : "#cbd5e1",
-                            background: isComplete ? "#ecfdf5" : "white",
-                            color: isComplete ? "#065f46" : canComplete ? "#0f172a" : "#94a3b8",
+                            borderColor: isComplete ? "var(--ok)" : canComplete ? "var(--text)" : "var(--border)",
+                            background: isComplete ? "color-mix(in oklab, var(--ok) 10%, var(--surface))" : "var(--surface)",
+                            color: isComplete ? "#065f46" : canComplete ? "var(--text)" : "var(--muted)",
                             fontWeight: isComplete ? 600 : 500,
                             opacity: isComplete ? 1 : canComplete ? 1 : 0.6,
                             cursor: isComplete ? "default" : canComplete ? "pointer" : "not-allowed",
@@ -378,7 +391,7 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                           {isComplete ? "Completed ✓" : "Mark Complete"}
                         </button>
 
-                        <label className="r-btn" style={S.btn}>
+                        <label className="u-btn" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                           Upload Photo
                           <input
                             type="file"
@@ -392,9 +405,9 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                         </label>
 
                         <input
-                          className="r-input"
+                          className="u-input"
                           placeholder="Add note"
-                          style={{ ...S.input, background: isComplete ? "#f0fdf4" : "white" }}
+                          style={{ background: isComplete ? "color-mix(in oklab, var(--ok) 12%, var(--surface))" : "var(--surface)" }}
                           value={state.note}
                           onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
                           disabled={isComplete && !task.noteRequired}
@@ -414,23 +427,23 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
         );
       })}
 
-      {/* Review Queue: show submissions that have tasks marked Rework */}
-      <div style={S.card} className="card-pad-tight">
+      {/* Review Queue */}
+      <div className="u-card card-pad-tight" style={S.card}>
         <div style={S.h2}>Review Queue (Rework Needed)</div>
         {submissions.filter(s => s.status === "Rework").length === 0 ? (
-          <div style={{ fontSize: 14, color: "#64748b" }}>No rework requested.</div>
+          <div style={{ fontSize: 14, color: "var(--muted)" }}>No rework requested.</div>
         ) : (
           submissions.filter(s => s.status === "Rework").map((s) => (
-            <div key={s.id} style={{ ...S.card, borderRadius: 14, marginTop: 8 }} className="card-pad-tight">
+            <div key={s.id} className="u-card card-pad-tight" style={{ ...S.card, borderRadius: 14, marginTop: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <div>
                   <div style={{ fontWeight: 600 }}>{s.tasklistName}</div>
-                  <div style={{ fontSize: 12, color: "#475569" }}>{s.date} • Signed: {s.signedBy}</div>
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>{s.date} • Signed: {s.signedBy}</div>
                 </div>
-                <span style={{ ...S.tag, borderColor: "#f59e0b", color: "#8a5a00" }}>Rework</span>
+                <span className="tag warn">Rework</span>
               </div>
 
-              <div className="table-scroll">
+              <div className="table-scroll" style={{ marginTop: 8 }}>
                 <table style={S.table}>
                   <thead>
                     <tr>
@@ -452,23 +465,22 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                             {meta.inputType === "number" && (
                               <input
                                 type="number"
-                                className="r-input"
+                                className="u-input"
                                 placeholder={`${meta.min ?? ""}-${meta.max ?? ""}`}
-                                style={{ ...S.input, width: 90, marginRight: 6 }}
+                                style={{ width: 100, marginRight: 6 }}
                                 value={t.value ?? ""}
                                 onChange={(e) => updateSubmissionTask(s.id, t.taskId, { value: Number(e.target.value) })}
                               />
                             )}
                             <input
-                              className="r-input"
+                              className="u-input"
                               placeholder="Add note"
-                              style={S.input}
                               value={t.note ?? ""}
                               onChange={(e) => updateSubmissionTask(s.id, t.taskId, { note: e.target.value })}
                             />
                           </td>
                           <td className="hide-sm" style={S.td}>
-                            <label className="r-btn" style={S.btn}>
+                            <label className="u-btn">
                               Upload
                               <input
                                 type="file"
@@ -479,18 +491,17 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                                 }}
                               />
                             </label>
-                            <div style={{ marginTop: 6 }}>
-                              {(t.photos || []).map((p, j) => <span key={j} style={S.tag}>{p}</span>)}
+                            <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              {(t.photos || []).map((p, j) => <span key={j} className="tag">{p}</span>)}
                             </div>
                           </td>
                           <td style={S.td}>
                             <button
-                              className="r-btn"
+                              className="u-btn"
                               style={{
-                                ...S.btn,
-                                borderColor: isComplete ? "#10b981" : canComplete ? "#0f172a" : "#cbd5e1",
-                                color: isComplete ? "#065f46" : canComplete ? "#0f172a" : "#94a3b8",
-                                background: isComplete ? "#ecfdf5" : "white"
+                                borderColor: isComplete ? "var(--ok)" : canComplete ? "var(--text)" : "var(--border)",
+                                color: isComplete ? "#065f46" : canComplete ? "var(--text)" : "var(--muted)",
+                                background: isComplete ? "color-mix(in oklab, var(--ok) 10%, var(--surface))" : "var(--surface)"
                               }}
                               disabled={isComplete || !canComplete}
                               onClick={() => updateSubmissionTask(s.id, t.taskId, { status: "Complete" })}
@@ -507,19 +518,15 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
                 <button
-                  className="r-btn"
-                  style={S.btnPrimary}
+                  className="u-btnPrimary"
                   onClick={() => {
-                    // 1) In the submission: only tasks that were rework and are now valid/complete -> back to Pending
                     batchUpdateSubmissionTasks(s.id, (task, meta) => {
                       if (task.reviewStatus === "Rework" && task.status === "Complete" && canTaskBeCompleted(meta, task)) {
                         return { reviewStatus: "Pending" };
                       }
                       return null;
                     });
-                    // 2) Mirror to working
                     mirrorReworkPendingToWorking(s.id);
-                    // 3) Recompute overall status
                     recomputeSubmissionStatus(s.id);
                     alert("Resubmitted fixes for review.");
                   }}
@@ -534,7 +541,7 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
     </div>
   );
 
-  // ---- Helpers to edit submissions from Employee review queue ----
+  // ---- Helpers (Review Queue) ----
   function updateSubmissionTask(submissionId, taskId, patch) {
     setSubmissions((prev) =>
       prev.map((s) => {
@@ -579,11 +586,11 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
 function EvidenceRow({ state }) {
   if (!state) return null;
   return (
-    <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap", fontSize: 12, color: "#334155" }}>
-      {state.photos?.map((p, i) => (<span key={i} style={S.tag}>{p}</span>))}
-      {state.note && <span style={S.tag}>Note: {state.note}</span>}
-      {state.value !== null && state.value !== undefined && <span style={S.tag}>Value: {state.value}</span>}
-      {state.na && <span style={S.tag}>N/A</span>}
+    <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap", fontSize: 12 }}>
+      {state.photos?.map((p, i) => (<span key={i} className="tag">{p}</span>))}
+      {state.note && <span className="tag">Note: {state.note}</span>}
+      {state.value !== null && state.value !== undefined && <span className="tag">Value: {state.value}</span>}
+      {state.na && <span className="tag">N/A</span>}
     </div>
   );
 }
@@ -591,13 +598,13 @@ function EvidenceRow({ state }) {
 function PinDialog({ onClose, onConfirm }) {
   const [pin, setPin] = useState("");
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-      <div style={{ ...S.card, padding: 20, width: 360 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+      <div className="u-card elevated" style={{ padding: 20, width: 360 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Enter PIN</div>
-        <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="••••" className="r-input" style={{ ...S.input, width: "100%", marginBottom: 12 }} />
+        <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="••••" className="u-input" style={{ width: "100%", marginBottom: 12 }} />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button className="r-btn" style={S.btn} onClick={onClose}>Cancel</button>
-          <button className="r-btn" style={S.btnPrimary} onClick={() => { if (pin && typeof onConfirm === "function") onConfirm(pin); }}>Confirm</button>
+          <button className="u-btn" onClick={onClose}>Cancel</button>
+          <button className="u-btnPrimary" onClick={() => { if (pin && typeof onConfirm === "function") onConfirm(pin); }}>Confirm</button>
         </div>
       </div>
     </div>
@@ -606,7 +613,6 @@ function PinDialog({ onClose, onConfirm }) {
 
 // ---------------------- Manager ----------------------
 function ManagerView({ submissions, setSubmissions, setWorking }) {
-  // track selection per submission: a Set of taskIds
   const [selection, setSelection] = useState({}); // { [submissionId]: Set(taskId) }
 
   function toggle(subId, taskId) {
@@ -623,15 +629,11 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
         if (s.id !== subId) return s;
         const sel = selection[subId] || new Set();
 
-        // Update selected tasks' reviewStatus
         const tasks = s.tasks.map((t) => (sel.has(t.taskId) ? { ...t, reviewStatus: review } : t));
-
-        // Compute overall status
         const hasRework = tasks.some((t) => t.reviewStatus === "Rework");
         const allApproved = tasks.length > 0 && tasks.every((t) => t.reviewStatus === "Approved");
         const status = hasRework ? "Rework" : (allApproved ? "Approved" : "Pending");
 
-        // Also mirror into employee working state:
         setWorking((prevW) => {
           const list = prevW[s.tasklistId];
           if (!list) return prevW;
@@ -647,36 +649,26 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
         return { ...s, tasks, status };
       })
     );
-
-    // Clear selection after action
     setSelection((prev) => ({ ...prev, [subId]: new Set() }));
   }
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div className="r-grid" style={{ gap: 16 }}>
       <h1 style={S.h1}>Manager Review</h1>
-      {submissions.length === 0 ? <div style={{ fontSize: 14, color: "#64748b" }}>No submissions yet.</div> : null}
+      {submissions.length === 0 ? <div style={{ fontSize: 14, color: "var(--muted)" }}>No submissions yet.</div> : null}
 
       {submissions.map((s) => (
-        <div key={s.id} style={{ ...S.card, borderRadius: 16 }} className="card-pad-tight">
+        <div key={s.id} className="u-card elevated card-pad-tight" style={{ ...S.card, borderRadius: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontWeight: 600 }}>{s.tasklistName}</div>
-              <div style={{ fontSize: 12, color: "#475569" }}>{s.date} • Signed: {s.signedBy}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>{s.date} • Signed: {s.signedBy}</div>
             </div>
-            <span
-              style={{
-                ...S.tag,
-                borderColor: s.status === "Approved" ? "#10b981" : s.status === "Rework" ? "#f59e0b" : "#94a3b8",
-                color: s.status === "Approved" ? "#065f46" : s.status === "Rework" ? "#8a5a00" : "#475569",
-              }}
-            >
-              {s.status}
-            </span>
+            <span className={`tag ${s.status === "Approved" ? "ok" : s.status === "Rework" ? "warn" : ""}`}>{s.status}</span>
           </div>
 
-          <div className="table-scroll">
-            <table style={{ ...S.table, marginTop: 8 }}>
+          <div className="table-scroll" style={{ marginTop: 8 }}>
+            <table style={S.table}>
               <thead>
                 <tr>
                   <th style={S.th}>
@@ -713,25 +705,15 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
                       <td className="hide-sm" style={S.td}>{t.value !== null && t.value !== undefined ? String(t.value) : "-"}</td>
                       <td className="hide-sm" style={S.td}>{t.note || "-"}</td>
                       <td className="hide-sm" style={S.td}>
-                        {(t.photos || []).length ? (t.photos || []).map((p, j) => <span key={j} style={S.tag}>{p}</span>) : "-"}
+                        {(t.photos || []).length ? (t.photos || []).map((p, j) => <span key={j} className="tag">{p}</span>) : "-"}
                       </td>
                       <td style={S.td}>
-                        <span style={{ ...S.tag, borderColor: t.status === "Complete" ? "#10b981" : "#94a3b8" }}>
+                        <span className={`tag ${t.status === "Complete" ? "ok" : ""}`}>
                           {t.na ? "N/A" : t.status}
                         </span>
                       </td>
                       <td style={S.td}>
-                        <span
-                          style={{
-                            ...S.tag,
-                            borderColor:
-                              t.reviewStatus === "Approved" ? "#10b981" :
-                              t.reviewStatus === "Rework" ? "#f59e0b" : "#94a3b8",
-                            color:
-                              t.reviewStatus === "Approved" ? "#065f46" :
-                              t.reviewStatus === "Rework" ? "#8a5a00" : "#475569"
-                          }}
-                        >
+                        <span className={`tag ${t.reviewStatus === "Approved" ? "ok" : t.reviewStatus === "Rework" ? "warn" : ""}`}>
                           {t.reviewStatus}
                         </span>
                       </td>
@@ -743,8 +725,8 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
           </div>
 
           <div className="sticky-actions">
-            <button className="r-btn" style={S.btn} onClick={() => applyReview(s.id, "Rework")}>Rework Selected</button>
-            <button className="r-btn" style={S.btnPrimary} onClick={() => applyReview(s.id, "Approved")}>Approve Selected</button>
+            <button className="u-btn" onClick={() => applyReview(s.id, "Rework")}>Rework Selected</button>
+            <button className="u-btnPrimary" onClick={() => applyReview(s.id, "Approved")}>Approve Selected</button>
           </div>
         </div>
       ))}
@@ -763,52 +745,48 @@ function AdminView({ tasklists, submissions }) {
       acc[k].total += totalSubs.length;
       acc[k].approved += totalSubs.filter((s) => s.status === "Approved").length;
     });
-    return Object.values(acc).map((r) => ({ name: r.name, completion: pct(r.approved, r.total) }));
+    return Object.values(acc).map((r) => ({ name: r.name, completion: (r.total ? Math.round((r.approved / r.total) * 100) : 0) }));
   }, [tasklists, submissions]);
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <h1 style={S.h1}>Admin — Reports & Config</h1>
-
-      <div className="r-grid r-grid-2">
-        <div style={S.card} className="card-pad-tight">
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Completion by Time Block</div>
-          <div className="table-scroll">
-            <table style={S.table}>
-              <thead>
-                <tr>
-                  <th style={S.th}>Time Block</th>
-                  <th style={S.th}>Completion</th>
+    <div className="r-grid r-grid-2" style={{ gap: 12 }}>
+      <div className="u-card elevated card-pad-tight" style={S.card}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Completion by Time Block</div>
+        <div className="table-scroll">
+          <table style={S.table}>
+            <thead>
+              <tr>
+                <th style={S.th}>Time Block</th>
+                <th style={S.th}>Completion</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byBlock.map((r, i) => (
+                <tr key={i}>
+                  <td style={S.td}>{r.name}</td>
+                  <td style={S.td}>{r.completion}%</td>
                 </tr>
-              </thead>
-              <tbody>
-                {byBlock.map((r, i) => (
-                  <tr key={i}>
-                    <td style={S.td}>{r.name}</td>
-                    <td style={S.td}>{r.completion}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div style={S.card} className="card-pad-tight">
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Tasklists</div>
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {tasklists.map((tl) => (
-              <li key={tl.id} style={{ padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
-                <div style={{ fontWeight: 500 }}>{tl.name}</div>
-                <div style={{ fontSize: 12, color: "#475569" }}>{getTimeBlockLabel(tl.timeBlockId)} • {tl.tasks.length} tasks</div>
-              </li>
-            ))}
-          </ul>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <div style={S.card} className="card-pad-tight">
+      <div className="u-card elevated card-pad-tight" style={S.card}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Tasklists</div>
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {tasklists.map((tl) => (
+            <li key={tl.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ fontWeight: 500 }}>{tl.name}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>{getTimeBlockLabel(tl.timeBlockId)} • {tl.tasks.length} tasks</div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="u-card card-pad-tight" style={S.card}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Flow Summary</div>
-        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 14, color: "#334155" }}>
+        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 14, color: "var(--muted)" }}>
           <li>Employee completes tasks and <b>Sign & Submit</b> → submission appears for Manager.</li>
           <li>Manager selects rows → <b>Approve Selected</b> or <b>Rework Selected</b>.</li>
           <li>Rework makes the submission status <b>Rework</b> and shows in Employee’s <b>Review Queue</b>.</li>

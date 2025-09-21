@@ -1,117 +1,162 @@
-/* Breakpoints */
+/* ---------- Base layout & viewport ---------- */
+html, body, #root { height: 100%; }
+* { box-sizing: border-box; }
+
 :root {
-  --bp-sm: 480px;
-  --bp-md: 768px;
-  --bp-lg: 1024px;
+  /* spacing */
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 14px;
+  --space-4: 16px;
+  --radius: 14px;
+
+  /* light palette */
+  --bg: #f7f9fc;
+  --surface: #ffffff;
+  --surface-soft: #f1f5f9;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #e2e8f0;
+
+  /* accents */
+  --brand: #0ea5e9;
+  --ok: #10b981;
+  --warn: #f59e0b;
+
+  /* shadows */
+  --shadow-1: 0 1px 2px rgba(0,0,0,.05);
+  --shadow-2: 0 6px 24px rgba(2,6,23,.06);
 }
 
-/* Container + page */
-.app-container {
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 12px;
-}
-@media (min-width: var(--bp-md)) {
-  .app-container { padding: 16px; }
+:root.theme-dark {
+  --bg: #0b1020;
+  --surface: #0f172a;
+  --surface-soft: #0b1222;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --border: #1f2937;
+  --shadow-1: 0 1px 2px rgba(0,0,0,.35);
+  --shadow-2: 0 8px 30px rgba(0,0,0,.45);
 }
 
-/* Header */
+.app-page {
+  min-height: 100dvh;         /* fills laptop viewport including URL bar quirks */
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---------- Header ---------- */
 .app-header {
   position: sticky;
   top: 0;
-  z-index: 10;
-  background: rgba(255,255,255,0.9);
-  -webkit-backdrop-filter: saturate(1.2) blur(6px);
-  backdrop-filter: saturate(1.2) blur(6px);
-  border-bottom: 1px solid #e2e8f0;
+  z-index: 50;
+  background: color-mix(in oklab, var(--surface) 92%, transparent);
+  backdrop-filter: saturate(1.2) blur(8px);
+  border-bottom: 1px solid var(--border);
 }
 .app-header-inner {
-  max-width: 1080px;
   margin: 0 auto;
-  padding: 10px 12px;
+  padding: 10px var(--space-4);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
+  max-width: 1440px;
 }
 .app-header-actions {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
-/* On small screens: stack header rows */
-@media (max-width: var(--bp-md)) {
-  .app-header-inner {
-    flex-wrap: wrap;
-    gap: 10px 8px;
-  }
-  .app-header-actions {
-    width: 100%;
-    justify-content: space-between;
-  }
+/* ---------- Container widths ---------- */
+.app-container {
+  max-width: 1440px;          /* full laptop width */
+  margin: 0 auto;
+  padding: var(--space-4);
 }
 
-/* Responsive grids (cards) */
-.r-grid {
-  display: grid;
-  gap: 12px;
+/* ---------- Cards / Buttons / Inputs (utility classes) ---------- */
+.u-card {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow-1) !important;
 }
-.r-grid-2 {
-  grid-template-columns: 1fr;
+.u-card.elevated { box-shadow: var(--shadow-2) !important; }
+.u-card:hover { box-shadow: var(--shadow-2) !important; transition: box-shadow .2s ease; }
+
+.u-btn, .u-btnPrimary {
+  min-height: 40px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform .05s ease, background .15s ease, border-color .15s ease;
 }
-@media (min-width: var(--bp-md)) {
+.u-btn:active, .u-btnPrimary:active { transform: translateY(1px); }
+.u-btn:hover { background: var(--surface-soft); }
+.u-btnPrimary {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--surface);
+}
+.u-btnPrimary:hover { filter: brightness(1.05); }
+
+.u-input, select.u-input {
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* ---------- Grids & responsive rows ---------- */
+.r-grid { display: grid; gap: 12px; }
+.r-grid-2 { grid-template-columns: 1fr; }
+@media (min-width: 900px) {
   .r-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (min-width: var(--bp-lg)) {
+@media (min-width: 1200px) {
   .r-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* Actions row inside cards */
 .r-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;          /* wrap on phones */
+  flex-wrap: wrap;
 }
-@media (max-width: var(--bp-sm)) {
-  .r-actions > * { flex: 1 1 auto; }  /* make buttons/inputs grow on tiny phones */
-}
+@media (max-width: 520px) { .r-actions > * { flex: 1 1 auto; } }
 
-/* Touch-friendly targets */
-.r-input, .r-btn {
-  min-height: 38px;
-}
-@media (max-width: var(--bp-md)) {
-  .r-btn { padding: 10px 12px; }
-  .r-input { padding: 8px 10px; }
-}
-
-/* Tables: horizontal scroll on mobile */
-.table-scroll {
-  width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.table-scroll table { min-width: 640px; }
-
-/* Hide columns on very small screens if needed */
+/* ---------- Tables ---------- */
+.table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll table { min-width: 720px; }
 .hide-sm { display: none; }
-@media (min-width: var(--bp-md)) {.hide-sm { display: table-cell; }}
+@media (min-width: 800px) { .hide-sm { display: table-cell; } }
 
-/* Card spacing tweak on tight screens */
-@media (max-width: var(--bp-sm)) {
-  .card-pad-tight { padding: 12px !important; }
+/* ---------- Status tags ---------- */
+.tag {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
+.tag.ok { border-color: var(--ok); color: #065f46; background: color-mix(in oklab, var(--ok) 18%, var(--surface)); }
+.tag.warn { border-color: var(--warn); color: #8a5a00; background: color-mix(in oklab, var(--warn) 18%, var(--surface)); }
 
-/* Sticky approve/rework bar (manager) */
-.sticky-actions {
-  position: sticky;
-  bottom: 0;
-  background: white;
-  border-top: 1px solid #e2e8f0;
-  padding: 8px;
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+/* ---------- Misc polish ---------- */
+.brand-dot {
+  width: 28px; height: 28px; border-radius: 8px; background: var(--brand);
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--surface) 25%, transparent);
 }
+.card-pad-tight { padding: 12px !important; }
