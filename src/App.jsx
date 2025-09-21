@@ -1,5 +1,6 @@
 import '@mantine/core/styles.css';
 import React, { useMemo, useState, useEffect } from "react";
+import AdminView from "./AdminView";
 import {
   MantineProvider,
   createTheme,
@@ -547,64 +548,12 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
 }
 
 /** ---------------------- Admin View ---------------------- */
-function AdminView({ tasklists, submissions }) {
-  const byBlock = useMemo(() => {
-    const acc = {};
-    tasklists.forEach((tl) => {
-      const k = tl.timeBlockId;
-      if (!acc[k]) acc[k] = { name: getTimeBlockLabel(k), total: 0, approved: 0 };
-      const totalSubs = submissions.filter((s) => s.tasklistId === tl.id);
-      acc[k].total += totalSubs.length;
-      acc[k].approved += totalSubs.filter((s) => s.status === "Approved").length;
-    });
-    return Object.values(acc).map((r) => ({ name: r.name, completion: r.total ? Math.round((r.approved / r.total) * 100) : 0 }));
-  }, [tasklists, submissions]);
-
-  return (
-    <Grid gutter="md">
-      <Grid.Col span={{ base: 12, md: 6 }}>
-        <Card withBorder radius="lg" shadow="sm">
-          <Text fw={600} mb="xs">Completion by Time Block</Text>
-          <Table>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Time Block</Table.Th>
-                <Table.Th>Completion</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {byBlock.map((r, i) => (
-                <Table.Tr key={i}>
-                  <Table.Td>{r.name}</Table.Td>
-                  <Table.Td>{r.completion}%</Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </Card>
-      </Grid.Col>
-
-      <Grid.Col span={{ base: 12, md: 6 }}>
-        <Card withBorder radius="lg" shadow="sm">
-          <Text fw={600} mb="xs">Tasklists</Text>
-          <Stack gap="xs">
-            {tasklists.map((tl) => (
-              <div key={tl.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--mantine-color-gray-3)" }}>
-                <Text fw={500}>{tl.name}</Text>
-                <Text c="dimmed" fz="sm">{getTimeBlockLabel(tl.timeBlockId)} • {tl.tasks.length} tasks</Text>
-              </div>
-            ))}
-          </Stack>
-        </Card>
-      </Grid.Col>
-    </Grid>
-  );
-}
 
 /** ---------------------- Main App (v7 Provider setup) ---------------------- */
 const theme = createTheme({});
 
 export default function App() {
+  const [companyAccent, setCompanyAccent] = useState("#0ea5e9");
   // Persisted scheme
   const [scheme, setScheme] = useLocalStorage({
     key: "theme",
@@ -708,13 +657,14 @@ export default function App() {
         header={{ height: 64 }}
         padding="md"
         withBorder={false}
-        styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)" } }}
+        styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)", overflow: "hidden" } }}
       >
-        <AppShell.Header style={{borderBottom: "1px solid var(--mantine-color-gray-3)"}}>
+
+        <AppShell.Header style={{ borderBottom: "1px solid var(--mantine-color-gray-3)" }}>
           <Group h={64} px="md" justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
             {/* left */}
             <Group gap="sm">
-              <div style={{ width: 28, height: 28, borderRadius: 8, background: MOCK_COMPANY.brand.primary }} />
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: companyAccent }} />
               <Text fw={700}>{MOCK_COMPANY.name}</Text>
             </Group>
             {/* right */}
@@ -757,7 +707,16 @@ export default function App() {
             {mode === "manager" && (
               <ManagerView submissions={submissions} setSubmissions={setSubmissions} setWorking={setWorking} />
             )}
-            {mode === "admin" && <AdminView tasklists={MOCK_TASKLISTS} submissions={submissions} />}
+            {mode === "admin" && (
+              <div style={{ paddingInline: "1px", paddingTop: 0, paddingBottom: "16px" }}>
+                <AdminView
+                  tasklists={MOCK_TASKLISTS}
+                  submissions={submissions}
+                  onBrandColorChange={(c) => setCompanyAccent(c || "#0ea5e9")}
+                />
+              </div>
+
+            )}
           </Container>
         </AppShell.Main>
 
