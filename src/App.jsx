@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from "react";
+import "./responsive.css";
 
 /**
- * SOP Checklist App — Submissions + Manager per-task review
+ * SOP Checklist App — Submissions + Manager per-task review (Responsive)
  * - JavaScript only, no extra deps
  * - Employee: Today (do work) + Review Queue (fix rework)
  * - Manager: Per-task selection (approve / rework), shows photos/notes/values
@@ -99,23 +100,6 @@ function getTaskMeta(tasklistId, taskId) {
   return t || { title: taskId, inputType: "checkbox" };
 }
 
-function mirrorReworkPendingToWorking(submissionId) {
-  // Find the submission we just updated
-  const sub = submissions.find(x => x.id === submissionId);
-  if (!sub) return;
-  setSubmissions((prev) => prev); // no-op, just to keep the pattern
-
-  // For any task whose reviewStatus is now Pending (was Rework), copy that status into working
-  setWorking((prevW) => {
-    const list = prevW[sub.tasklistId];
-    if (!list) return prevW;
-    const pendingIds = sub.tasks.filter(t => t.reviewStatus === "Pending").map(t => t.taskId);
-    const nextList = list.map(wt => pendingIds.includes(wt.taskId) ? { ...wt, reviewStatus: "Pending" } : wt);
-    return { ...prevW, [sub.tasklistId]: nextList };
-  });
-}
-
-
 // ---------------------- Main App ----------------------
 export default function App() {
   const [mode, setMode] = useState("employee");
@@ -132,7 +116,7 @@ export default function App() {
     tasklistsToday.reduce((acc, tl) => {
       acc[tl.id] = tl.tasks.map((t) => ({
         taskId: t.id, status: "Incomplete", value: null, note: "", photos: [], na: false,
-        reviewStatus: "Pending" // review status is for submissions; keep default here
+        reviewStatus: "Pending"
       }));
       return acc;
     }, {})
@@ -153,7 +137,6 @@ export default function App() {
           next[tl.id] = tl.tasks.map((t) => ({ taskId: t.id, status: "Incomplete", value: null, note: "", photos: [], na: false, reviewStatus: "Pending" }));
         }
       });
-      // remove non-visible lists
       Object.keys(next).forEach((k) => {
         if (!tasklistsToday.find(tl => tl.id === k)) delete next[k];
       });
@@ -200,7 +183,7 @@ export default function App() {
     setPinModal({
       open: true,
       onConfirm: (pin) => {
-        const payload = working[tl.id].map(t => ({ ...t, reviewStatus: "Pending" })); // keep employee progress
+        const payload = working[tl.id].map(t => ({ ...t, reviewStatus: "Pending" })); // keep progress
         const submission = {
           id: `ci_${Date.now()}`,
           tasklistId: tl.id,
@@ -214,7 +197,7 @@ export default function App() {
         };
         setSubmissions((prev) => [submission, ...prev]);
 
-        // Update working to reflect that tasks are now pending review (but DO NOT reset statuses/values/photos).
+        // Mark tasks as pending review in the working copy (do NOT reset anything).
         setWorking((prev) => ({
           ...prev,
           [tl.id]: prev[tl.id].map(t => ({ ...t, reviewStatus: "Pending" })),
@@ -228,19 +211,20 @@ export default function App() {
 
   return (
     <div style={S.page}>
-      <div style={S.header}>
-        <div style={S.headerInner}>
+      {/* Responsive Header */}
+      <div className="app-header">
+        <div className="app-header-inner">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 28, height: 28, borderRadius: 8, background: MOCK_COMPANY.brand.primary }} />
             <div style={{ fontWeight: 600 }}>{MOCK_COMPANY.name}</div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="app-header-actions">
             {["employee", "manager", "admin"].map((m) => (
-              <button key={m} onClick={() => setMode(m)} style={S.badge(mode === m)}>
+              <button key={m} onClick={() => setMode(m)} style={S.badge(mode === m)} className="r-btn">
                 {m[0].toUpperCase() + m.slice(1)}
               </button>
             ))}
-            <select style={S.select} value={activeLocationId} onChange={(e) => setActiveLocationId(e.target.value)}>
+            <select className="r-input" style={S.select} value={activeLocationId} onChange={(e) => setActiveLocationId(e.target.value)}>
               {MOCK_LOCATIONS.map((l) => (
                 <option key={l.id} value={l.id}>{l.name}</option>
               ))}
@@ -249,7 +233,7 @@ export default function App() {
         </div>
       </div>
 
-      <main style={S.container}>
+      <main className="app-container">
         {mode === "employee" && (
           <EmployeeView
             tasklists={tasklistsToday}
@@ -282,6 +266,19 @@ export default function App() {
 
 // ---------------------- Employee ----------------------
 function EmployeeView({ tasklists, working, updateTaskState, handleComplete, handleUpload, signoff, submissions, setSubmissions, setWorking }) {
+  // helper must live here so it can see props
+  function mirrorReworkPendingToWorking(submissionId) {
+    const sub = submissions.find(x => x.id === submissionId);
+    if (!sub) return;
+    setWorking((prevW) => {
+      const list = prevW[sub.tasklistId];
+      if (!list) return prevW;
+      const pendingIds = sub.tasks.filter(t => t.reviewStatus === "Pending").map(t => t.taskId);
+      const nextList = list.map(wt => pendingIds.includes(wt.taskId) ? { ...wt, reviewStatus: "Pending" } : wt);
+      return { ...prevW, [sub.tasklistId]: nextList };
+    });
+  }
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <h1 style={S.h1}>Today</h1>
@@ -295,14 +292,14 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
         });
 
         return (
-          <div key={tl.id} style={S.card}>
+          <div key={tl.id} style={S.card} className="card-pad-tight">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
               <div>
                 <div style={{ fontWeight: 600 }}>{tl.name}</div>
                 <div style={{ fontSize: 12, color: "#475569" }}>{getTimeBlockLabel(tl.timeBlockId)}</div>
                 <div style={{ marginTop: 6 }}><span style={S.tag}>Progress: {done}/{total} ({pct(done, total)}%)</span></div>
               </div>
-              <button style={{ ...S.btnPrimary, opacity: canSubmit ? 1 : 0.5 }} onClick={() => signoff(tl)} disabled={!canSubmit}>
+              <button className="r-btn" style={{ ...S.btnPrimary, opacity: canSubmit ? 1 : 0.5 }} onClick={() => signoff(tl)} disabled={!canSubmit}>
                 Sign & Submit
               </button>
             </div>
@@ -314,7 +311,7 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                 const canComplete = canTaskBeCompleted(task, state);
 
                 return (
-                  <div key={task.id} style={{ ...S.card, borderRadius: 12, borderColor: isComplete ? "#10b981" : "#e2e8f0", background: isComplete ? "#ecfdf5" : "white" }}>
+                  <div key={task.id} style={{ ...S.card, borderRadius: 12, borderColor: isComplete ? "#10b981" : "#e2e8f0", background: isComplete ? "#ecfdf5" : "white" }} className="card-pad-tight">
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span aria-hidden style={{
@@ -326,37 +323,45 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                           <div style={{ fontWeight: 600, color: isComplete ? "#065f46" : "#0f172a" }}>{task.title}</div>
                           <div style={{ fontSize: 12, color: isComplete ? "#065f46" : "#475569" }}>
                             {task.category} • {task.inputType}{task.photoRequired ? " • Photo required" : ""}{task.noteRequired ? " • Note required" : ""}
-                            {/* Manager review badge */}
-                            {state.reviewStatus && (
-                              <div style={{ marginTop: 6 }}>
-                                <span
-                                  style={{
-                                    ...S.tag,
-                                    borderColor:
-                                      state.reviewStatus === "Approved" ? "#10b981" :
-                                        state.reviewStatus === "Rework" ? "#f59e0b" : "#94a3b8",
-                                    color:
-                                      state.reviewStatus === "Approved" ? "#065f46" :
-                                        state.reviewStatus === "Rework" ? "#8a5a00" : "#475569",
-                                  }}
-                                  title="Manager review status"
-                                >
-                                  {state.reviewStatus}
-                                </span>
-                              </div>
-                            )}
-
                           </div>
+
+                          {/* Manager review badge */}
+                          {state.reviewStatus && (
+                            <div style={{ marginTop: 6 }}>
+                              <span
+                                style={{
+                                  ...S.tag,
+                                  borderColor:
+                                    state.reviewStatus === "Approved" ? "#10b981" :
+                                    state.reviewStatus === "Rework" ? "#f59e0b" : "#94a3b8",
+                                  color:
+                                    state.reviewStatus === "Approved" ? "#065f46" :
+                                    state.reviewStatus === "Rework" ? "#8a5a00" : "#475569",
+                                }}
+                                title="Manager review status"
+                              >
+                                {state.reviewStatus}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
-                      <div style={S.row}>
+                      <div className="r-actions">
                         {task.inputType === "number" && (
-                          <input type="number" placeholder={`${task.min ?? ""}-${task.max ?? ""}`} style={{ ...S.input, width: 80, background: isComplete ? "#f0fdf4" : "white" }}
-                            value={state.value ?? ""} onChange={(e) => updateTaskState(tl.id, task.id, { value: Number(e.target.value) })} disabled={isComplete} />
+                          <input
+                            type="number"
+                            className="r-input"
+                            placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
+                            style={{ ...S.input, minWidth: 80, maxWidth: 140, background: isComplete ? "#f0fdf4" : "white" }}
+                            value={state.value ?? ""}
+                            onChange={(e) => updateTaskState(tl.id, task.id, { value: Number(e.target.value) })}
+                            disabled={isComplete}
+                          />
                         )}
 
                         <button
+                          className="r-btn"
                           style={{
                             ...S.btn,
                             borderColor: isComplete ? "#10b981" : canComplete ? "#0f172a" : "#cbd5e1",
@@ -373,16 +378,27 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                           {isComplete ? "Completed ✓" : "Mark Complete"}
                         </button>
 
-                        <label style={S.btn}>
+                        <label className="r-btn" style={S.btn}>
                           Upload Photo
-                          <input type="file" style={{ display: "none" }}
-                            onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) handleUpload(tl, task, f); }}
-                            disabled={isComplete} />
+                          <input
+                            type="file"
+                            style={{ display: "none" }}
+                            onChange={(e) => {
+                              const f = e.target.files && e.target.files[0];
+                              if (f) handleUpload(tl, task, f);
+                            }}
+                            disabled={isComplete}
+                          />
                         </label>
 
-                        <input placeholder="Add note" style={{ ...S.input, background: isComplete ? "#f0fdf4" : "white" }}
-                          value={state.note} onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
-                          disabled={isComplete && !task.noteRequired} />
+                        <input
+                          className="r-input"
+                          placeholder="Add note"
+                          style={{ ...S.input, background: isComplete ? "#f0fdf4" : "white" }}
+                          value={state.note}
+                          onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
+                          disabled={isComplete && !task.noteRequired}
+                        />
 
                         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, opacity: isComplete ? 0.7 : 1 }}>
                           <input type="checkbox" checked={!!state.na} onChange={(e) => updateTaskState(tl.id, task.id, { na: e.target.checked })} disabled={isComplete} /> N/A
@@ -399,13 +415,13 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
       })}
 
       {/* Review Queue: show submissions that have tasks marked Rework */}
-      <div style={S.card}>
+      <div style={S.card} className="card-pad-tight">
         <div style={S.h2}>Review Queue (Rework Needed)</div>
         {submissions.filter(s => s.status === "Rework").length === 0 ? (
           <div style={{ fontSize: 14, color: "#64748b" }}>No rework requested.</div>
         ) : (
           submissions.filter(s => s.status === "Rework").map((s) => (
-            <div key={s.id} style={{ ...S.card, borderRadius: 14, marginTop: 8 }}>
+            <div key={s.id} style={{ ...S.card, borderRadius: 14, marginTop: 8 }} className="card-pad-tight">
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <div>
                   <div style={{ fontWeight: 600 }}>{s.tasklistName}</div>
@@ -414,64 +430,84 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                 <span style={{ ...S.tag, borderColor: "#f59e0b", color: "#8a5a00" }}>Rework</span>
               </div>
 
-              <table style={S.table}>
-                <thead>
-                  <tr>
-                    <th style={S.th}>Task</th>
-                    <th style={S.th}>Value/Note</th>
-                    <th style={S.th}>Photos</th>
-                    <th style={S.th}>Fix</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {s.tasks.filter(t => t.reviewStatus === "Rework").map((t, i) => {
-                    const meta = getTaskMeta(s.tasklistId, t.taskId);
-                    const isComplete = t.status === "Complete";
-                    const canComplete = canTaskBeCompleted(meta, t);
-                    return (
-                      <tr key={i}>
-                        <td style={S.td}><b>{meta.title}</b></td>
-                        <td style={S.td}>
-                          {meta.inputType === "number" && (
-                            <input type="number" placeholder={`${meta.min ?? ""}-${meta.max ?? ""}`} style={{ ...S.input, width: 90, marginRight: 6 }}
-                              value={t.value ?? ""} onChange={(e) => updateSubmissionTask(s.id, t.taskId, { value: Number(e.target.value) })} />
-                          )}
-                          <input placeholder="Add note" style={S.input} value={t.note ?? ""} onChange={(e) => updateSubmissionTask(s.id, t.taskId, { note: e.target.value })} />
-                        </td>
-                        <td style={S.td}>
-                          <label style={S.btn}>
-                            Upload
-                            <input type="file" style={{ display: "none" }} onChange={(e) => {
-                              const f = e.target.files && e.target.files[0];
-                              if (f) updateSubmissionTask(s.id, t.taskId, (prev) => ({ photos: [...(prev.photos || []), f.name] }));
-                            }} />
-                          </label>
-                          <div style={{ marginTop: 6 }}>
-                            {(t.photos || []).map((p, j) => <span key={j} style={S.tag}>{p}</span>)}
-                          </div>
-                        </td>
-                        <td style={S.td}>
-                          <button
-                            style={{
-                              ...S.btn,
-                              borderColor: isComplete ? "#10b981" : canComplete ? "#0f172a" : "#cbd5e1",
-                              color: isComplete ? "#065f46" : canComplete ? "#0f172a" : "#94a3b8",
-                              background: isComplete ? "#ecfdf5" : "white"
-                            }}
-                            disabled={isComplete || !canComplete}
-                            onClick={() => updateSubmissionTask(s.id, t.taskId, { status: "Complete" })}
-                          >
-                            {isComplete ? "Completed ✓" : "Mark Complete"}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <div className="table-scroll">
+                <table style={S.table}>
+                  <thead>
+                    <tr>
+                      <th style={S.th}>Task</th>
+                      <th style={S.th}>Value/Note</th>
+                      <th className="hide-sm" style={S.th}>Photos</th>
+                      <th style={S.th}>Fix</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {s.tasks.filter(t => t.reviewStatus === "Rework").map((t, i) => {
+                      const meta = getTaskMeta(s.tasklistId, t.taskId);
+                      const isComplete = t.status === "Complete";
+                      const canComplete = canTaskBeCompleted(meta, t);
+                      return (
+                        <tr key={i}>
+                          <td style={S.td}><b>{meta.title}</b></td>
+                          <td style={S.td}>
+                            {meta.inputType === "number" && (
+                              <input
+                                type="number"
+                                className="r-input"
+                                placeholder={`${meta.min ?? ""}-${meta.max ?? ""}`}
+                                style={{ ...S.input, width: 90, marginRight: 6 }}
+                                value={t.value ?? ""}
+                                onChange={(e) => updateSubmissionTask(s.id, t.taskId, { value: Number(e.target.value) })}
+                              />
+                            )}
+                            <input
+                              className="r-input"
+                              placeholder="Add note"
+                              style={S.input}
+                              value={t.note ?? ""}
+                              onChange={(e) => updateSubmissionTask(s.id, t.taskId, { note: e.target.value })}
+                            />
+                          </td>
+                          <td className="hide-sm" style={S.td}>
+                            <label className="r-btn" style={S.btn}>
+                              Upload
+                              <input
+                                type="file"
+                                style={{ display: "none" }}
+                                onChange={(e) => {
+                                  const f = e.target.files && e.target.files[0];
+                                  if (f) updateSubmissionTask(s.id, t.taskId, (prev) => ({ photos: [...(prev.photos || []), f.name] }));
+                                }}
+                              />
+                            </label>
+                            <div style={{ marginTop: 6 }}>
+                              {(t.photos || []).map((p, j) => <span key={j} style={S.tag}>{p}</span>)}
+                            </div>
+                          </td>
+                          <td style={S.td}>
+                            <button
+                              className="r-btn"
+                              style={{
+                                ...S.btn,
+                                borderColor: isComplete ? "#10b981" : canComplete ? "#0f172a" : "#cbd5e1",
+                                color: isComplete ? "#065f46" : canComplete ? "#0f172a" : "#94a3b8",
+                                background: isComplete ? "#ecfdf5" : "white"
+                              }}
+                              disabled={isComplete || !canComplete}
+                              onClick={() => updateSubmissionTask(s.id, t.taskId, { status: "Complete" })}
+                            >
+                              {isComplete ? "Completed ✓" : "Mark Complete"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
                 <button
+                  className="r-btn"
                   style={S.btnPrimary}
                   onClick={() => {
                     // 1) In the submission: only tasks that were rework and are now valid/complete -> back to Pending
@@ -481,32 +517,12 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                       }
                       return null;
                     });
-                  
-                    // 2) Mirror to working: same tasks back to Pending (keep their completed evidence)
-                    setSubmissions((curSubs) => {
-                      const cur = curSubs.find(x => x.id === s.id);
-                      if (!cur) return curSubs;
-                  
-                      // We'll figure out which tasks changed to Pending and reflect in working
-                      const tlId = cur.tasklistId;
-                      const tlMeta = getTasklistById(tlId);
-                      // Note: use setWorking from props of EmployeeView's parent; we have access here via closure
-                      // So expose setSubmissions to keep state, and use window.setWorkingFallback if needed
-                      // BUT easier: lift a helper up — we can access setWorking via props? If not, add it to EmployeeView props.
-                      return curSubs; // keep array same; the real working sync happens right after via a dedicated call below
-                    });
-                  
-                    // *** Add this call just after the batchUpdateSubmissionTasks above ***
-                    // (We need setWorking here; since EmployeeView already received setSubmissions,
-                    // pass setWorking into EmployeeView props like we did for ManagerView OR
-                    // put this sync logic in App and call via a callback. For simplicity, add setWorking to EmployeeView props.)
-                    // Example call (after you pass setWorking into EmployeeView props):
-                      mirrorReworkPendingToWorking(s.id);
-                  
+                    // 2) Mirror to working
+                    mirrorReworkPendingToWorking(s.id);
+                    // 3) Recompute overall status
                     recomputeSubmissionStatus(s.id);
                     alert("Resubmitted fixes for review.");
                   }}
-                  
                 >
                   Resubmit for Review
                 </button>
@@ -578,10 +594,10 @@ function PinDialog({ onClose, onConfirm }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
       <div style={{ ...S.card, padding: 20, width: 360 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Enter PIN</div>
-        <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="••••" style={{ ...S.input, width: "100%", marginBottom: 12 }} />
+        <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="••••" className="r-input" style={{ ...S.input, width: "100%", marginBottom: 12 }} />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button style={S.btn} onClick={onClose}>Cancel</button>
-          <button style={S.btnPrimary} onClick={() => { if (pin && typeof onConfirm === "function") onConfirm(pin); }}>Confirm</button>
+          <button className="r-btn" style={S.btn} onClick={onClose}>Cancel</button>
+          <button className="r-btn" style={S.btnPrimary} onClick={() => { if (pin && typeof onConfirm === "function") onConfirm(pin); }}>Confirm</button>
         </div>
       </div>
     </div>
@@ -606,47 +622,35 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
       prev.map((s) => {
         if (s.id !== subId) return s;
         const sel = selection[subId] || new Set();
-  
+
         // Update selected tasks' reviewStatus
         const tasks = s.tasks.map((t) => (sel.has(t.taskId) ? { ...t, reviewStatus: review } : t));
-  
+
         // Compute overall status
         const hasRework = tasks.some((t) => t.reviewStatus === "Rework");
         const allApproved = tasks.length > 0 && tasks.every((t) => t.reviewStatus === "Approved");
         const status = hasRework ? "Rework" : (allApproved ? "Approved" : "Pending");
-  
+
         // Also mirror into employee working state:
         setWorking((prevW) => {
-          // Only update the same tasklist
           const list = prevW[s.tasklistId];
           if (!list) return prevW;
           const nextList = list.map((wt) => {
             if (!sel.has(wt.taskId)) return wt;
-  
-            // If manager approved: keep Complete, mark reviewStatus Approved
-            if (review === "Approved") {
-              return { ...wt, status: "Complete", reviewStatus: "Approved" };
-            }
-  
-            // If manager reworks: set back to Incomplete and mark reviewStatus Rework
-            if (review === "Rework") {
-              return { ...wt, status: "Incomplete", reviewStatus: "Rework" };
-            }
-  
-            // Fallback (Pending)
+            if (review === "Approved") return { ...wt, status: "Complete", reviewStatus: "Approved" };
+            if (review === "Rework")   return { ...wt, status: "Incomplete", reviewStatus: "Rework" };
             return { ...wt, reviewStatus: review };
           });
           return { ...prevW, [s.tasklistId]: nextList };
         });
-  
+
         return { ...s, tasks, status };
       })
     );
-  
+
     // Clear selection after action
     setSelection((prev) => ({ ...prev, [subId]: new Set() }));
   }
-  
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -654,7 +658,7 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
       {submissions.length === 0 ? <div style={{ fontSize: 14, color: "#64748b" }}>No submissions yet.</div> : null}
 
       {submissions.map((s) => (
-        <div key={s.id} style={{ ...S.card, borderRadius: 16 }}>
+        <div key={s.id} style={{ ...S.card, borderRadius: 16 }} className="card-pad-tight">
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontWeight: 600 }}>{s.tasklistName}</div>
@@ -671,70 +675,76 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
             </span>
           </div>
 
-          <table style={{ ...S.table, marginTop: 8 }}>
-            <thead>
-              <tr>
-                <th style={S.th}><input
-                  type="checkbox"
-                  checked={(selection[s.id]?.size || 0) === s.tasks.length}
-                  onChange={(e) => {
-                    const all = new Set(e.target.checked ? s.tasks.map(t => t.taskId) : []);
-                    setSelection((prev) => ({ ...prev, [s.id]: all }));
-                  }}
-                /></th>
-                <th style={S.th}>Task</th>
-                <th style={S.th}>Value</th>
-                <th style={S.th}>Note</th>
-                <th style={S.th}>Photos</th>
-                <th style={S.th}>Employee Status</th>
-                <th style={S.th}>Review</th>
-              </tr>
-            </thead>
-            <tbody>
-              {s.tasks.map((t, i) => {
-                const meta = getTaskMeta(s.tasklistId, t.taskId);
-                return (
-                  <tr key={i}>
-                    <td style={S.td}>
-                      <input
-                        type="checkbox"
-                        checked={selection[s.id]?.has(t.taskId) || false}
-                        onChange={() => toggle(s.id, t.taskId)}
-                      />
-                    </td>
-                    <td style={S.td}><b>{meta.title}</b></td>
-                    <td style={S.td}>{t.value !== null && t.value !== undefined ? String(t.value) : "-"}</td>
-                    <td style={S.td}>{t.note || "-"}</td>
-                    <td style={S.td}>
-                      {(t.photos || []).length ? (t.photos || []).map((p, j) => <span key={j} style={S.tag}>{p}</span>) : "-"}
-                    </td>
-                    <td style={S.td}>
-                      <span style={{ ...S.tag, borderColor: t.status === "Complete" ? "#10b981" : "#94a3b8" }}>
-                        {t.na ? "N/A" : t.status}
-                      </span>
-                    </td>
-                    <td style={S.td}>
-                      <span style={{
-                        ...S.tag,
-                        borderColor:
-                          t.reviewStatus === "Approved" ? "#10b981" :
-                            t.reviewStatus === "Rework" ? "#f59e0b" : "#94a3b8",
-                        color:
-                          t.reviewStatus === "Approved" ? "#065f46" :
-                            t.reviewStatus === "Rework" ? "#8a5a00" : "#475569"
-                      }}>
-                        {t.reviewStatus}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table style={{ ...S.table, marginTop: 8 }}>
+              <thead>
+                <tr>
+                  <th style={S.th}>
+                    <input
+                      type="checkbox"
+                      checked={(selection[s.id]?.size || 0) === s.tasks.length}
+                      onChange={(e) => {
+                        const all = new Set(e.target.checked ? s.tasks.map(t => t.taskId) : []);
+                        setSelection((prev) => ({ ...prev, [s.id]: all }));
+                      }}
+                    />
+                  </th>
+                  <th style={S.th}>Task</th>
+                  <th className="hide-sm" style={S.th}>Value</th>
+                  <th className="hide-sm" style={S.th}>Note</th>
+                  <th className="hide-sm" style={S.th}>Photos</th>
+                  <th style={S.th}>Emp Status</th>
+                  <th style={S.th}>Review</th>
+                </tr>
+              </thead>
+              <tbody>
+                {s.tasks.map((t, i) => {
+                  const meta = getTaskMeta(s.tasklistId, t.taskId);
+                  return (
+                    <tr key={i}>
+                      <td style={S.td}>
+                        <input
+                          type="checkbox"
+                          checked={selection[s.id]?.has(t.taskId) || false}
+                          onChange={() => toggle(s.id, t.taskId)}
+                        />
+                      </td>
+                      <td style={S.td}><b>{meta.title}</b></td>
+                      <td className="hide-sm" style={S.td}>{t.value !== null && t.value !== undefined ? String(t.value) : "-"}</td>
+                      <td className="hide-sm" style={S.td}>{t.note || "-"}</td>
+                      <td className="hide-sm" style={S.td}>
+                        {(t.photos || []).length ? (t.photos || []).map((p, j) => <span key={j} style={S.tag}>{p}</span>) : "-"}
+                      </td>
+                      <td style={S.td}>
+                        <span style={{ ...S.tag, borderColor: t.status === "Complete" ? "#10b981" : "#94a3b8" }}>
+                          {t.na ? "N/A" : t.status}
+                        </span>
+                      </td>
+                      <td style={S.td}>
+                        <span
+                          style={{
+                            ...S.tag,
+                            borderColor:
+                              t.reviewStatus === "Approved" ? "#10b981" :
+                              t.reviewStatus === "Rework" ? "#f59e0b" : "#94a3b8",
+                            color:
+                              t.reviewStatus === "Approved" ? "#065f46" :
+                              t.reviewStatus === "Rework" ? "#8a5a00" : "#475569"
+                          }}
+                        >
+                          {t.reviewStatus}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
-            <button style={S.btn} onClick={() => applyReview(s.id, "Rework")}>Rework Selected</button>
-            <button style={S.btnPrimary} onClick={() => applyReview(s.id, "Approved")}>Approve Selected</button>
+          <div className="sticky-actions">
+            <button className="r-btn" style={S.btn} onClick={() => applyReview(s.id, "Rework")}>Rework Selected</button>
+            <button className="r-btn" style={S.btnPrimary} onClick={() => applyReview(s.id, "Approved")}>Approve Selected</button>
           </div>
         </div>
       ))}
@@ -759,28 +769,31 @@ function AdminView({ tasklists, submissions }) {
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <h1 style={S.h1}>Admin — Reports & Config</h1>
-      <div style={S.grid2}>
-        <div style={S.card}>
+
+      <div className="r-grid r-grid-2">
+        <div style={S.card} className="card-pad-tight">
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Completion by Time Block</div>
-          <table style={S.table}>
-            <thead>
-              <tr>
-                <th style={S.th}>Time Block</th>
-                <th style={S.th}>Completion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {byBlock.map((r, i) => (
-                <tr key={i}>
-                  <td style={S.td}>{r.name}</td>
-                  <td style={S.td}>{r.completion}%</td>
+          <div className="table-scroll">
+            <table style={S.table}>
+              <thead>
+                <tr>
+                  <th style={S.th}>Time Block</th>
+                  <th style={S.th}>Completion</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {byBlock.map((r, i) => (
+                  <tr key={i}>
+                    <td style={S.td}>{r.name}</td>
+                    <td style={S.td}>{r.completion}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        <div style={S.card}>
+        <div style={S.card} className="card-pad-tight">
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Tasklists</div>
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {tasklists.map((tl) => (
@@ -793,7 +806,7 @@ function AdminView({ tasklists, submissions }) {
         </div>
       </div>
 
-      <div style={S.card}>
+      <div style={S.card} className="card-pad-tight">
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Flow Summary</div>
         <ol style={{ margin: 0, paddingLeft: 18, fontSize: 14, color: "#334155" }}>
           <li>Employee completes tasks and <b>Sign & Submit</b> → submission appears for Manager.</li>

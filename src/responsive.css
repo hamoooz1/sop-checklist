@@ -1,0 +1,117 @@
+/* Breakpoints */
+:root {
+  --bp-sm: 480px;
+  --bp-md: 768px;
+  --bp-lg: 1024px;
+}
+
+/* Container + page */
+.app-container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 12px;
+}
+@media (min-width: var(--bp-md)) {
+  .app-container { padding: 16px; }
+}
+
+/* Header */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(255,255,255,0.9);
+  -webkit-backdrop-filter: saturate(1.2) blur(6px);
+  backdrop-filter: saturate(1.2) blur(6px);
+  border-bottom: 1px solid #e2e8f0;
+}
+.app-header-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.app-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* On small screens: stack header rows */
+@media (max-width: var(--bp-md)) {
+  .app-header-inner {
+    flex-wrap: wrap;
+    gap: 10px 8px;
+  }
+  .app-header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* Responsive grids (cards) */
+.r-grid {
+  display: grid;
+  gap: 12px;
+}
+.r-grid-2 {
+  grid-template-columns: 1fr;
+}
+@media (min-width: var(--bp-md)) {
+  .r-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: var(--bp-lg)) {
+  .r-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Actions row inside cards */
+.r-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;          /* wrap on phones */
+}
+@media (max-width: var(--bp-sm)) {
+  .r-actions > * { flex: 1 1 auto; }  /* make buttons/inputs grow on tiny phones */
+}
+
+/* Touch-friendly targets */
+.r-input, .r-btn {
+  min-height: 38px;
+}
+@media (max-width: var(--bp-md)) {
+  .r-btn { padding: 10px 12px; }
+  .r-input { padding: 8px 10px; }
+}
+
+/* Tables: horizontal scroll on mobile */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll table { min-width: 640px; }
+
+/* Hide columns on very small screens if needed */
+.hide-sm { display: none; }
+@media (min-width: var(--bp-md)) {.hide-sm { display: table-cell; }}
+
+/* Card spacing tweak on tight screens */
+@media (max-width: var(--bp-sm)) {
+  .card-pad-tight { padding: 12px !important; }
+}
+
+/* Sticky approve/rework bar (manager) */
+.sticky-actions {
+  position: sticky;
+  bottom: 0;
+  background: white;
+  border-top: 1px solid #e2e8f0;
+  padding: 8px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
