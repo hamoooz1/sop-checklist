@@ -1,27 +1,37 @@
+import '@mantine/core/styles.css';
 import React, { useMemo, useState, useEffect } from "react";
-import "./responsive.css";
+import {
+  MantineProvider,
+  createTheme,
+  AppShell,
+  Container,
+  Group,
+  Button,
+  Select,
+  Card,
+  Text,
+  Badge,
+  Table,
+  Grid,
+  Stack,
+  NumberInput,
+  TextInput,
+  Modal,
+  ActionIcon,
+  ScrollArea,
+  FileButton,
+  Switch,
+  SegmentedControl,
+  rem,
+} from "@mantine/core";
+import { useLocalStorage } from "@mantine/hooks";
+import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
 
-/**
- * SOP Checklist App — Responsive + Theme (JS only)
- */
-
-// ---------------------- Inline Styles (kept minimal) ----------------------
-const S = {
-  page: { fontFamily: "Inter, system-ui, Arial" },
-  h1: { fontSize: 22, fontWeight: 600, margin: "16px 0" },
-  h2: { fontSize: 18, fontWeight: 600, margin: "8px 0" },
-  card: { borderRadius: 16, padding: 16 },
-  input: {},
-  table: { width: "100%", borderCollapse: "collapse", fontSize: 14 },
-  th: { textAlign: "left", borderBottom: "1px solid var(--border)", padding: 6 },
-  td: { borderBottom: "1px solid var(--border)", padding: 6, verticalAlign: "top" },
-};
-
-// ---------------------- Mock Data ----------------------
-const MOCK_COMPANY = { id: "co_001", name: "FreshFork Hospitality", brand: { primary: "#0ea5e9" } };
+/** ---------------------- Mock Data ---------------------- */
+const MOCK_COMPANY = { id: "co_001", name: "Saba Foods", brand: { primary: "#0ea5e9" } };
 const MOCK_LOCATIONS = [
   { id: "loc_001", companyId: "co_001", name: "Main St Diner", timezone: "America/Los_Angeles" },
-  { id: "loc_002", companyId: "co_001", name: "Harbor Grill", timezone: "America/Los_Angeles" },
+  { id: "loc_002", companyId: "co_001", name: "Granville", timezone: "America/Los_Angeles" },
 ];
 const TIME_BLOCKS = [
   { id: "open", name: "Open", start: "05:00", end: "10:00" },
@@ -34,7 +44,7 @@ const MOCK_TASKLISTS = [
     locationId: "loc_001",
     name: "Open — FOH",
     timeBlockId: "open",
-    recurrence: [0,1,2,3,4,5,6],
+    recurrence: [0, 1, 2, 3, 4, 5, 6],
     requiresApproval: true,
     signoffMethod: "PIN",
     tasks: [
@@ -48,7 +58,7 @@ const MOCK_TASKLISTS = [
     locationId: "loc_001",
     name: "Close — BOH",
     timeBlockId: "close",
-    recurrence: [0,1,2,3,4,5,6],
+    recurrence: [0, 1, 2, 3, 4, 5, 6],
     requiresApproval: true,
     signoffMethod: "PIN",
     tasks: [
@@ -60,7 +70,7 @@ const MOCK_TASKLISTS = [
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-// ---------------------- Utils ----------------------
+/** ---------------------- Utils ---------------------- */
 function getTimeBlockLabel(id) {
   const tb = TIME_BLOCKS.find((t) => t.id === id);
   return tb ? `${tb.name} (${tb.start}–${tb.end})` : id;
@@ -80,545 +90,348 @@ function canTaskBeCompleted(task, state) {
   }
   return true;
 }
-function getTasklistById(id) { return MOCK_TASKLISTS.find(tl => tl.id === id); }
+function getTasklistById(id) { return MOCK_TASKLISTS.find((tl) => tl.id === id); }
 function getTaskMeta(tasklistId, taskId) {
   const tl = getTasklistById(tasklistId);
-  const t = tl?.tasks.find(x => x.id === taskId);
-  return t || { title: taskId, inputType: "checkbox" };
+  return tl?.tasks.find((x) => x.id === taskId) || { title: taskId, inputType: "checkbox" };
 }
 
-// ---------------------- Main App ----------------------
-export default function App() {
-  const [mode, setMode] = useState("employee");
-  const [activeLocationId, setActiveLocationId] = useState("loc_001");
-
-  // Theme (auto detect + toggle + persist)
-  const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem("theme");
-    if (saved) return saved;
-    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-    return prefersDark ? "dark" : "light";
-  });
-  useEffect(() => {
-    localStorage.setItem("theme", theme);
-    document.documentElement.classList.toggle("theme-dark", theme === "dark");
-    document.documentElement.classList.toggle("theme-light", theme === "light");
-  }, [theme]);
-  const themeClass = theme === "dark" ? "theme-dark" : "theme-light";
-
-  // Today’s tasklists
-  const tasklistsToday = useMemo(() => {
-    const dow = new Date().getDay();
-    return MOCK_TASKLISTS.filter((tl) => tl.locationId === activeLocationId && tl.recurrence.includes(dow));
-  }, [activeLocationId]);
-
-  // Working state
-  const [working, setWorking] = useState(() =>
-    tasklistsToday.reduce((acc, tl) => {
-      acc[tl.id] = tl.tasks.map((t) => ({
-        taskId: t.id, status: "Incomplete", value: null, note: "", photos: [], na: false,
-        reviewStatus: "Pending"
-      }));
-      return acc;
-    }, {})
-  );
-
-  // Submissions
-  const [submissions, setSubmissions] = useState([]);
-
-  // PIN modal
-  const [pinModal, setPinModal] = useState({ open: false, onConfirm: null });
-
-  // Ensure working state exists for visible lists
-  useEffect(() => {
-    setWorking((prev) => {
-      const next = { ...prev };
-      tasklistsToday.forEach((tl) => {
-        if (!next[tl.id]) {
-          next[tl.id] = tl.tasks.map((t) => ({ taskId: t.id, status: "Incomplete", value: null, note: "", photos: [], na: false, reviewStatus: "Pending" }));
-        }
-      });
-      Object.keys(next).forEach((k) => {
-        if (!tasklistsToday.find(tl => tl.id === k)) delete next[k];
-      });
-      return next;
-    });
-  }, [tasklistsToday]);
-
-  function updateTaskState(tlId, taskId, patch) {
-    setWorking((prev) => {
-      const next = { ...prev };
-      next[tlId] = next[tlId].map((ti) => (ti.taskId === taskId ? { ...ti, ...(typeof patch === "function" ? patch(ti) : patch) } : ti));
-      return next;
-    });
-  }
-
-  function handleComplete(tl, task) {
-    const state = working[tl.id].find((s) => s.taskId === task.id);
-    if (!canTaskBeCompleted(task, state)) {
-      alert("Finish required inputs first (photo/note/number in range).");
-      return;
-    }
-    updateTaskState(tl.id, task.id, { status: "Complete", value: state.value ?? true });
-  }
-
-  function handleUpload(tl, task, file) {
-    updateTaskState(tl.id, task.id, (ti) => ({ photos: [...(ti.photos || []), file.name] }));
-  }
-
-  function canSubmitTasklist(tl) {
-    const states = working[tl.id];
-    for (const t of tl.tasks) {
-      const st = states.find((s) => s.taskId === t.id);
-      const ok = (st.status === "Complete" || st.na) && canTaskBeCompleted(t, st);
-      if (!ok) return false;
-    }
-    return true;
-  }
-
-  function signoff(tl) {
-    if (!canSubmitTasklist(tl)) {
-      alert("Please complete all required tasks first.");
-      return;
-    }
-    setPinModal({
-      open: true,
-      onConfirm: (pin) => {
-        const payload = working[tl.id].map(t => ({ ...t, reviewStatus: "Pending" }));
-        const submission = {
-          id: `ci_${Date.now()}`,
-          tasklistId: tl.id,
-          tasklistName: tl.name,
-          locationId: tl.locationId,
-          date: todayISO(),
-          status: "Pending",
-          signedBy: `PIN-${pin}`,
-          signedAt: new Date().toISOString(),
-          tasks: payload,
-        };
-        setSubmissions((prev) => [submission, ...prev]);
-        setWorking((prev) => ({
-          ...prev,
-          [tl.id]: prev[tl.id].map(t => ({ ...t, reviewStatus: "Pending" })),
-        }));
-        setPinModal({ open: false, onConfirm: null });
-        alert("Submitted for manager review.");
-      },
-    });
-  }
-
+/** ---------------------- Theme toggle (prop-driven) ---------------------- */
+function ThemeToggle({ scheme, setScheme }) {
+  const next = scheme === "dark" ? "light" : "dark";
   return (
-    <div className={`app-page ${themeClass}`} style={S.page}>
-      {/* Header */}
-      <div className="app-header">
-        <div className="app-header-inner">
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div className="brand-dot" />
-            <div style={{ fontWeight: 600 }}>{MOCK_COMPANY.name}</div>
-          </div>
-
-          <div className="app-header-actions">
-            {["employee", "manager", "admin"].map((m) => (
-              <button key={m} onClick={() => setMode(m)} className={`u-btn ${mode === m ? "is-active" : ""}`} style={{ borderColor: mode === m ? "var(--text)" : undefined }}>
-                {m[0].toUpperCase() + m.slice(1)}
-              </button>
-            ))}
-
-            <select className="u-input" value={activeLocationId} onChange={(e) => setActiveLocationId(e.target.value)}>
-              {MOCK_LOCATIONS.map((l) => (
-                <option key={l.id} value={l.id}>{l.name}</option>
-              ))}
-            </select>
-
-            <button
-              className="u-btn"
-              aria-label="Toggle theme"
-              title="Toggle theme"
-              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-            >
-              {theme === "dark" ? "🌞 Light" : "🌙 Dark"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Main */}
-      <main className="app-container">
-        {mode === "employee" && (
-          <EmployeeView
-            tasklists={tasklistsToday}
-            working={working}
-            updateTaskState={updateTaskState}
-            handleComplete={handleComplete}
-            handleUpload={handleUpload}
-            signoff={signoff}
-            submissions={submissions}
-            setSubmissions={setSubmissions}
-            setWorking={setWorking}
-          />
-        )}
-
-        {mode === "manager" && (
-          <ManagerView
-            submissions={submissions}
-            setSubmissions={setSubmissions}
-            setWorking={setWorking}
-          />
-        )}
-
-        {mode === "admin" && <AdminView tasklists={MOCK_TASKLISTS} submissions={submissions} />}
-      </main>
-
-      {pinModal.open && <PinDialog onClose={() => setPinModal({ open: false, onConfirm: null })} onConfirm={pinModal.onConfirm} />}
-    </div>
+    <ActionIcon
+      variant="default"
+      radius="md"
+      size="lg"
+      onClick={() => setScheme(next)}
+      aria-label="Toggle color scheme"
+      title="Toggle color scheme"
+    >
+      {scheme === "dark" ? <IconSun size={18} /> : <IconMoon size={18} />}
+    </ActionIcon>
   );
 }
 
-// ---------------------- Employee ----------------------
+/** ---------------------- Pin Modal ---------------------- */
+function PinDialog({ opened, onClose, onConfirm }) {
+  const [pin, setPin] = useState("");
+  return (
+    <Modal opened={opened} onClose={onClose} title="Enter PIN" centered>
+      <Stack gap="sm">
+        <TextInput type="password" placeholder="••••" value={pin} onChange={(e) => setPin(e.target.value)} autoFocus />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => pin && onConfirm && onConfirm(pin)}>Confirm</Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+/** ---------------------- Evidence ---------------------- */
+function EvidenceRow({ state }) {
+  if (!state) return null;
+  return (
+    <Group gap="xs" mt="xs" wrap="wrap">
+      {(state.photos || []).map((p, i) => (
+        <Badge key={i} variant="light" leftSection={<IconPhoto size={14} />}>{p}</Badge>
+      ))}
+      {state.note ? <Badge variant="light">Note: {state.note}</Badge> : null}
+      {state.value !== null && state.value !== undefined ? <Badge variant="light">Value: {state.value}</Badge> : null}
+      {state.na ? <Badge variant="light" color="gray">N/A</Badge> : null}
+    </Group>
+  );
+}
+
+/** ---------------------- Employee View ---------------------- */
 function EmployeeView({ tasklists, working, updateTaskState, handleComplete, handleUpload, signoff, submissions, setSubmissions, setWorking }) {
-  function mirrorReworkPendingToWorking(submissionId) {
-    const sub = submissions.find(x => x.id === submissionId);
-    if (!sub) return;
-    setWorking((prevW) => {
-      const list = prevW[sub.tasklistId];
-      if (!list) return prevW;
-      const pendingIds = sub.tasks.filter(t => t.reviewStatus === "Pending").map(t => t.taskId);
-      const nextList = list.map(wt => pendingIds.includes(wt.taskId) ? { ...wt, reviewStatus: "Pending" } : wt);
-      return { ...prevW, [sub.tasklistId]: nextList };
-    });
-  }
-
   return (
-    <div className="r-grid" style={{ gap: 16 }}>
-      <h1 style={S.h1}>Today</h1>
+    <Stack gap="md">
+      <Text fw={700} fz="lg">Today</Text>
 
       {tasklists.map((tl) => {
         const states = working[tl.id];
         const total = tl.tasks.length;
         const done = states.filter((t) => t.status === "Complete" || t.na).length;
         const canSubmit = tl.tasks.every((t) => {
-          const st = states.find(s => s.taskId === t.id);
+          const st = states.find((s) => s.taskId === t.id);
           return (st.status === "Complete" || st.na) && canTaskBeCompleted(t, st);
         });
 
         return (
-          <div key={tl.id} className="u-card elevated card-pad-tight" style={S.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <Card key={tl.id} withBorder radius="lg" shadow="sm">
+            <Group justify="space-between" align="center">
               <div>
-                <div style={{ fontWeight: 600 }}>{tl.name}</div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>{getTimeBlockLabel(tl.timeBlockId)}</div>
-                <div style={{ marginTop: 6 }}>
-                  <span className="tag">Progress: {done}/{total} ({pct(done, total)}%)</span>
-                </div>
+                <Text fw={600}>{tl.name}</Text>
+                <Text c="dimmed" fz="sm">{getTimeBlockLabel(tl.timeBlockId)}</Text>
+                <Badge mt={6} variant="light">Progress: {done}/{total} ({pct(done, total)}%)</Badge>
               </div>
-              <button className="u-btnPrimary" style={{ opacity: canSubmit ? 1 : 0.5 }} onClick={() => signoff(tl)} disabled={!canSubmit}>
-                Sign & Submit
-              </button>
-            </div>
+              <Button onClick={() => signoff(tl)} disabled={!canSubmit}>Sign & Submit</Button>
+            </Group>
 
-            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+            <Stack gap="sm" mt="md">
               {tl.tasks.map((task) => {
                 const state = states.find((s) => s.taskId === task.id);
                 const isComplete = state.status === "Complete";
                 const canComplete = canTaskBeCompleted(task, state);
-
                 return (
-                  <div
+                  <Card
                     key={task.id}
-                    className="u-card card-pad-tight"
+                    withBorder
+                    radius="md"
                     style={{
-                      ...S.card,
-                      borderRadius: 12,
-                      borderColor: isComplete ? "var(--ok)" : "var(--border)",
-                      background: isComplete ? "color-mix(in oklab, var(--ok) 10%, var(--surface))" : "var(--surface)"
+                      borderColor: isComplete ? "var(--mantine-color-green-6)" : undefined,
+                      background: isComplete ? "color-mix(in oklab, var(--mantine-color-green-6) 9%, var(--mantine-color-body))" : undefined,
                     }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span aria-hidden style={{
-                          width: 22, height: 22, borderRadius: 999, display: "inline-flex", alignItems: "center",
-                          justifyContent: "center", fontSize: 14, fontWeight: 700,
-                          color: isComplete ? "#065f46" : "var(--muted)",
-                          background: isComplete ? "color-mix(in oklab, var(--ok) 35%, var(--surface))" : "var(--surface-soft)",
-                          border: `1px solid ${isComplete ? "var(--ok)" : "var(--border)"}`
-                        }}>{isComplete ? "✓" : "•"}</span>
-                        <div>
-                          <div style={{ fontWeight: 600, color: isComplete ? "#065f46" : "var(--text)" }}>{task.title}</div>
-                          <div style={{ fontSize: 12, color: isComplete ? "#065f46" : "var(--muted)" }}>
-                            {task.category} • {task.inputType}{task.photoRequired ? " • Photo required" : ""}{task.noteRequired ? " • Note required" : ""}
-                          </div>
-
-                          {state.reviewStatus && (
-                            <div style={{ marginTop: 6 }}>
-                              <span
-                                className={`tag ${state.reviewStatus === "Approved" ? "ok" : state.reviewStatus === "Rework" ? "warn" : ""}`}
-                                title="Manager review status"
-                              >
+                    <Grid align="center">
+                      <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <Group gap="sm">
+                          <Badge radius="xl" variant="outline" color={isComplete ? "green" : "gray"} leftSection={isComplete ? <IconCheck size={14} /> : null}>
+                            {isComplete ? "Completed" : "Task"}
+                          </Badge>
+                          <div>
+                            <Text fw={600} c={isComplete ? "green.9" : undefined}>{task.title}</Text>
+                            <Text c={isComplete ? "green.9" : "dimmed"} fz="sm">
+                              {task.category} • {task.inputType}
+                              {task.photoRequired ? " • Photo required" : ""}
+                              {task.noteRequired ? " • Note required" : ""}
+                            </Text>
+                            {state.reviewStatus && (
+                              <Badge mt={6} variant="outline" color={state.reviewStatus === "Approved" ? "green" : state.reviewStatus === "Rework" ? "yellow" : "gray"}>
                                 {state.reviewStatus}
-                              </span>
-                            </div>
+                              </Badge>
+                            )}
+                          </div>
+                        </Group>
+                      </Grid.Col>
+
+                      <Grid.Col span={{ base: 12, sm: 6 }}>
+                        <Group gap="xs" wrap="wrap" justify="flex-end">
+                          {task.inputType === "number" && (
+                            <NumberInput
+                              placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
+                              value={state.value ?? ""}
+                              onChange={(v) => updateTaskState(tl.id, task.id, { value: Number(v) })}
+                              disabled={isComplete}
+                              style={{ minWidth: rem(92) }}
+                            />
                           )}
-                        </div>
-                      </div>
 
-                      <div className="r-actions">
-                        {task.inputType === "number" && (
-                          <input
-                            type="number"
-                            className="u-input"
-                            placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
-                            style={{ minWidth: 80, maxWidth: 140, background: isComplete ? "color-mix(in oklab, var(--ok) 12%, var(--surface))" : "var(--surface)" }}
-                            value={state.value ?? ""}
-                            onChange={(e) => updateTaskState(tl.id, task.id, { value: Number(e.target.value) })}
-                            disabled={isComplete}
+                          <Button
+                            variant={isComplete ? "outline" : "default"}
+                            color={isComplete ? "green" : undefined}
+                            onClick={() => handleComplete(tl, task)}
+                            disabled={!canComplete || isComplete}
+                          >
+                            {isComplete ? "Completed ✓" : "Mark Complete"}
+                          </Button>
+
+                          <FileButton onChange={(file) => file && handleUpload(tl, task, file)} accept="image/*" disabled={isComplete}>
+                            {(props) => (
+                              <Button variant="default" leftSection={<IconUpload size={16} />} {...props}>
+                                Upload Photo
+                              </Button>
+                            )}
+                          </FileButton>
+
+                          <TextInput
+                            placeholder="Add note"
+                            value={state.note}
+                            onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
+                            disabled={isComplete && !task.noteRequired}
+                            style={{ minWidth: rem(180) }}
                           />
-                        )}
 
-                        <button
-                          className="u-btn"
-                          style={{
-                            borderColor: isComplete ? "var(--ok)" : canComplete ? "var(--text)" : "var(--border)",
-                            background: isComplete ? "color-mix(in oklab, var(--ok) 10%, var(--surface))" : "var(--surface)",
-                            color: isComplete ? "#065f46" : canComplete ? "var(--text)" : "var(--muted)",
-                            fontWeight: isComplete ? 600 : 500,
-                            opacity: isComplete ? 1 : canComplete ? 1 : 0.6,
-                            cursor: isComplete ? "default" : canComplete ? "pointer" : "not-allowed",
-                          }}
-                          onClick={() => handleComplete(tl, task)}
-                          disabled={!canComplete || isComplete}
-                          title={isComplete ? "Already completed" : (canComplete ? "Complete task" : "Finish required items first")}
-                        >
-                          {isComplete ? "Completed ✓" : "Mark Complete"}
-                        </button>
-
-                        <label className="u-btn" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                          Upload Photo
-                          <input
-                            type="file"
-                            style={{ display: "none" }}
-                            onChange={(e) => {
-                              const f = e.target.files && e.target.files[0];
-                              if (f) handleUpload(tl, task, f);
-                            }}
+                          <Switch
+                            checked={!!state.na}
+                            onChange={(e) => updateTaskState(tl.id, task.id, { na: e.currentTarget.checked })}
                             disabled={isComplete}
+                            label="N/A"
                           />
-                        </label>
+                        </Group>
+                      </Grid.Col>
+                    </Grid>
 
-                        <input
-                          className="u-input"
-                          placeholder="Add note"
-                          style={{ background: isComplete ? "color-mix(in oklab, var(--ok) 12%, var(--surface))" : "var(--surface)" }}
-                          value={state.note}
-                          onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
-                          disabled={isComplete && !task.noteRequired}
-                        />
-
-                        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, opacity: isComplete ? 0.7 : 1 }}>
-                          <input type="checkbox" checked={!!state.na} onChange={(e) => updateTaskState(tl.id, task.id, { na: e.target.checked })} disabled={isComplete} /> N/A
-                        </label>
-                      </div>
-                    </div>
                     <EvidenceRow state={state} />
-                  </div>
+                  </Card>
                 );
               })}
-            </div>
-          </div>
+            </Stack>
+          </Card>
         );
       })}
 
-      {/* Review Queue */}
-      <div className="u-card card-pad-tight" style={S.card}>
-        <div style={S.h2}>Review Queue (Rework Needed)</div>
-        {submissions.filter(s => s.status === "Rework").length === 0 ? (
-          <div style={{ fontSize: 14, color: "var(--muted)" }}>No rework requested.</div>
+      {/* Review Queue (Rework) */}
+      <Card withBorder radius="lg" shadow="sm">
+        <Text fw={600} fz="lg" mb="xs">Review Queue (Rework Needed)</Text>
+        {submissions.filter((s) => s.status === "Rework").length === 0 ? (
+          <Text c="dimmed" fz="sm">No rework requested.</Text>
         ) : (
-          submissions.filter(s => s.status === "Rework").map((s) => (
-            <div key={s.id} className="u-card card-pad-tight" style={{ ...S.card, borderRadius: 14, marginTop: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{s.tasklistName}</div>
-                  <div style={{ fontSize: 12, color: "var(--muted)" }}>{s.date} • Signed: {s.signedBy}</div>
-                </div>
-                <span className="tag warn">Rework</span>
-              </div>
-
-              <div className="table-scroll" style={{ marginTop: 8 }}>
-                <table style={S.table}>
-                  <thead>
-                    <tr>
-                      <th style={S.th}>Task</th>
-                      <th style={S.th}>Value/Note</th>
-                      <th className="hide-sm" style={S.th}>Photos</th>
-                      <th style={S.th}>Fix</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {s.tasks.filter(t => t.reviewStatus === "Rework").map((t, i) => {
-                      const meta = getTaskMeta(s.tasklistId, t.taskId);
-                      const isComplete = t.status === "Complete";
-                      const canComplete = canTaskBeCompleted(meta, t);
-                      return (
-                        <tr key={i}>
-                          <td style={S.td}><b>{meta.title}</b></td>
-                          <td style={S.td}>
-                            {meta.inputType === "number" && (
-                              <input
-                                type="number"
-                                className="u-input"
-                                placeholder={`${meta.min ?? ""}-${meta.max ?? ""}`}
-                                style={{ width: 100, marginRight: 6 }}
-                                value={t.value ?? ""}
-                                onChange={(e) => updateSubmissionTask(s.id, t.taskId, { value: Number(e.target.value) })}
-                              />
-                            )}
-                            <input
-                              className="u-input"
-                              placeholder="Add note"
-                              value={t.note ?? ""}
-                              onChange={(e) => updateSubmissionTask(s.id, t.taskId, { note: e.target.value })}
-                            />
-                          </td>
-                          <td className="hide-sm" style={S.td}>
-                            <label className="u-btn">
-                              Upload
-                              <input
-                                type="file"
-                                style={{ display: "none" }}
-                                onChange={(e) => {
-                                  const f = e.target.files && e.target.files[0];
-                                  if (f) updateSubmissionTask(s.id, t.taskId, (prev) => ({ photos: [...(prev.photos || []), f.name] }));
-                                }}
-                              />
-                            </label>
-                            <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                              {(t.photos || []).map((p, j) => <span key={j} className="tag">{p}</span>)}
-                            </div>
-                          </td>
-                          <td style={S.td}>
-                            <button
-                              className="u-btn"
-                              style={{
-                                borderColor: isComplete ? "var(--ok)" : canComplete ? "var(--text)" : "var(--border)",
-                                color: isComplete ? "#065f46" : canComplete ? "var(--text)" : "var(--muted)",
-                                background: isComplete ? "color-mix(in oklab, var(--ok) 10%, var(--surface))" : "var(--surface)"
-                              }}
-                              disabled={isComplete || !canComplete}
-                              onClick={() => updateSubmissionTask(s.id, t.taskId, { status: "Complete" })}
-                            >
-                              {isComplete ? "Completed ✓" : "Mark Complete"}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
-                <button
-                  className="u-btnPrimary"
-                  onClick={() => {
-                    batchUpdateSubmissionTasks(s.id, (task, meta) => {
-                      if (task.reviewStatus === "Rework" && task.status === "Complete" && canTaskBeCompleted(meta, task)) {
-                        return { reviewStatus: "Pending" };
-                      }
-                      return null;
-                    });
-                    mirrorReworkPendingToWorking(s.id);
-                    recomputeSubmissionStatus(s.id);
-                    alert("Resubmitted fixes for review.");
-                  }}
-                >
-                  Resubmit for Review
-                </button>
-              </div>
-            </div>
-          ))
+          submissions
+            .filter((s) => s.status === "Rework")
+            .map((s) => (
+              <EmployeeReworkCard
+                key={s.id}
+                s={s}
+                setSubmissions={setSubmissions}
+                setWorking={setWorking}
+              />
+            ))
         )}
-      </div>
-    </div>
+      </Card>
+    </Stack>
   );
+}
 
-  // ---- Helpers (Review Queue) ----
+function EmployeeReworkCard({ s, setSubmissions, setWorking }) {
   function updateSubmissionTask(submissionId, taskId, patch) {
     setSubmissions((prev) =>
-      prev.map((s) => {
-        if (s.id !== submissionId) return s;
-        const tasks = s.tasks.map((t) => {
+      prev.map((sx) => {
+        if (sx.id !== submissionId) return sx;
+        const tasks = sx.tasks.map((t) => {
           if (t.taskId !== taskId) return t;
           const p = typeof patch === "function" ? patch(t) : patch;
           return { ...t, ...p };
         });
-        return { ...s, tasks };
+        return { ...sx, tasks };
       })
     );
   }
   function batchUpdateSubmissionTasks(submissionId, decidePatch) {
     setSubmissions((prev) =>
-      prev.map((s) => {
-        if (s.id !== submissionId) return s;
-        const tl = getTasklistById(s.tasklistId);
-        const tasks = s.tasks.map((t) => {
-          const meta = tl.tasks.find(x => x.id === t.taskId) || {};
+      prev.map((sx) => {
+        if (sx.id !== submissionId) return sx;
+        const tl = getTasklistById(sx.tasklistId);
+        const tasks = sx.tasks.map((t) => {
+          const meta = tl.tasks.find((x) => x.id === t.taskId) || {};
           const p = decidePatch(t, meta);
           return p ? { ...t, ...p } : t;
         });
-        return { ...s, tasks };
+        return { ...sx, tasks };
       })
     );
   }
   function recomputeSubmissionStatus(submissionId) {
     setSubmissions((prev) =>
-      prev.map((s) => {
-        if (s.id !== submissionId) return s;
-        const statuses = s.tasks.map(t => t.reviewStatus);
+      prev.map((sx) => {
+        if (sx.id !== submissionId) return sx;
+        const statuses = sx.tasks.map((t) => t.reviewStatus);
         const hasRework = statuses.includes("Rework");
-        const allApproved = s.tasks.length > 0 && s.tasks.every(t => t.reviewStatus === "Approved");
-        const status = hasRework ? "Rework" : (allApproved ? "Approved" : "Pending");
-        return { ...s, status };
+        const allApproved = sx.tasks.length > 0 && sx.tasks.every((t) => t.reviewStatus === "Approved");
+        const status = hasRework ? "Rework" : allApproved ? "Approved" : "Pending";
+        return { ...sx, status };
       })
     );
   }
-}
 
-function EvidenceRow({ state }) {
-  if (!state) return null;
   return (
-    <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap", fontSize: 12 }}>
-      {state.photos?.map((p, i) => (<span key={i} className="tag">{p}</span>))}
-      {state.note && <span className="tag">Note: {state.note}</span>}
-      {state.value !== null && state.value !== undefined && <span className="tag">Value: {state.value}</span>}
-      {state.na && <span className="tag">N/A</span>}
-    </div>
-  );
-}
-
-function PinDialog({ onClose, onConfirm }) {
-  const [pin, setPin] = useState("");
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-      <div className="u-card elevated" style={{ padding: 20, width: 360 }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Enter PIN</div>
-        <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="••••" className="u-input" style={{ width: "100%", marginBottom: 12 }} />
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button className="u-btn" onClick={onClose}>Cancel</button>
-          <button className="u-btnPrimary" onClick={() => { if (pin && typeof onConfirm === "function") onConfirm(pin); }}>Confirm</button>
+    <Card withBorder radius="md" mt="sm">
+      <Group justify="space-between">
+        <div>
+          <Text fw={600}>{s.tasklistName}</Text>
+          <Text c="dimmed" fz="sm">{s.date} • Signed: {s.signedBy}</Text>
         </div>
-      </div>
-    </div>
+        <Badge color="yellow" variant="light">Rework</Badge>
+      </Group>
+
+      <ScrollArea mt="sm">
+        <Table highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Task</Table.Th>
+              <Table.Th>Value / Note</Table.Th>
+              <Table.Th className="hide-sm">Photos</Table.Th>
+              <Table.Th>Fix</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {s.tasks.filter((t) => t.reviewStatus === "Rework").map((t, i) => {
+              const meta = getTaskMeta(s.tasklistId, t.taskId);
+              const isComplete = t.status === "Complete";
+              const canComplete = canTaskBeCompleted(meta, t);
+              return (
+                <Table.Tr key={i}>
+                  <Table.Td><Text fw={600}>{meta.title}</Text></Table.Td>
+                  <Table.Td>
+                    <Group wrap="wrap" gap="xs">
+                      {meta.inputType === "number" && (
+                        <NumberInput
+                          placeholder={`${meta.min ?? ""}-${meta.max ?? ""}`}
+                          value={t.value ?? ""}
+                          onChange={(v) => updateSubmissionTask(s.id, t.taskId, { value: Number(v) })}
+                          style={{ width: rem(110) }}
+                        />
+                      )}
+                      <TextInput
+                        placeholder="Add note"
+                        value={t.note ?? ""}
+                        onChange={(e) => updateSubmissionTask(s.id, t.taskId, { note: e.target.value })}
+                        style={{ minWidth: rem(160) }}
+                      />
+                    </Group>
+                  </Table.Td>
+                  <Table.Td className="hide-sm">
+                    <Group gap="xs" wrap="wrap">
+                      <FileButton
+                        onChange={(file) => file && updateSubmissionTask(s.id, t.taskId, (prev) => ({ photos: [...(prev.photos || []), file.name] }))}
+                        accept="image/*"
+                      >
+                        {(props) => <Button variant="default" leftSection={<IconUpload size={16} />} {...props}>Upload</Button>}
+                      </FileButton>
+                      <Group gap="xs">
+                        {(t.photos || []).map((p, j) => (
+                          <Badge key={j} variant="light" leftSection={<IconPhoto size={14} />}>{p}</Badge>
+                        ))}
+                      </Group>
+                    </Group>
+                  </Table.Td>
+                  <Table.Td>
+                    <Button
+                      variant={isComplete ? "outline" : "default"}
+                      color={isComplete ? "green" : undefined}
+                      disabled={isComplete || !canComplete}
+                      onClick={() => updateSubmissionTask(s.id, t.taskId, { status: "Complete" })}
+                    >
+                      {isComplete ? "Completed ✓" : "Mark Complete"}
+                    </Button>
+                  </Table.Td>
+                </Table.Tr>
+              );
+            })}
+          </Table.Tbody>
+        </Table>
+      </ScrollArea>
+
+      <Group justify="flex-end" mt="sm">
+        <Button
+          onClick={() => {
+            batchUpdateSubmissionTasks(s.id, (task, meta) => {
+              if (task.reviewStatus === "Rework" && task.status === "Complete" && canTaskBeCompleted(meta, task)) {
+                return { reviewStatus: "Pending" };
+              }
+              return null;
+            });
+            recomputeSubmissionStatus(s.id);
+            alert("Resubmitted fixes for review.");
+          }}
+        >
+          Resubmit for Review
+        </Button>
+      </Group>
+    </Card>
   );
 }
 
-// ---------------------- Manager ----------------------
+/** ---------------------- Manager View ---------------------- */
 function ManagerView({ submissions, setSubmissions, setWorking }) {
-  const [selection, setSelection] = useState({}); // { [submissionId]: Set(taskId) }
+  const [selection, setSelection] = useState({});
 
   function toggle(subId, taskId) {
     setSelection((prev) => {
       const cur = new Set(prev[subId] || []);
-      if (cur.has(taskId)) cur.delete(taskId); else cur.add(taskId);
+      cur.has(taskId) ? cur.delete(taskId) : cur.add(taskId);
       return { ...prev, [subId]: cur };
     });
   }
@@ -628,11 +441,10 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
       prev.map((s) => {
         if (s.id !== subId) return s;
         const sel = selection[subId] || new Set();
-
         const tasks = s.tasks.map((t) => (sel.has(t.taskId) ? { ...t, reviewStatus: review } : t));
         const hasRework = tasks.some((t) => t.reviewStatus === "Rework");
         const allApproved = tasks.length > 0 && tasks.every((t) => t.reviewStatus === "Approved");
-        const status = hasRework ? "Rework" : (allApproved ? "Approved" : "Pending");
+        const status = hasRework ? "Rework" : allApproved ? "Approved" : "Pending";
 
         setWorking((prevW) => {
           const list = prevW[s.tasklistId];
@@ -640,7 +452,7 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
           const nextList = list.map((wt) => {
             if (!sel.has(wt.taskId)) return wt;
             if (review === "Approved") return { ...wt, status: "Complete", reviewStatus: "Approved" };
-            if (review === "Rework")   return { ...wt, status: "Incomplete", reviewStatus: "Rework" };
+            if (review === "Rework") return { ...wt, status: "Incomplete", reviewStatus: "Rework" };
             return { ...wt, reviewStatus: review };
           });
           return { ...prevW, [s.tasklistId]: nextList };
@@ -653,88 +465,88 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
   }
 
   return (
-    <div className="r-grid" style={{ gap: 16 }}>
-      <h1 style={S.h1}>Manager Review</h1>
-      {submissions.length === 0 ? <div style={{ fontSize: 14, color: "var(--muted)" }}>No submissions yet.</div> : null}
+    <Stack gap="md">
+      <Text fw={700} fz="lg">Manager Review</Text>
+      {submissions.length === 0 ? <Text c="dimmed" fz="sm">No submissions yet.</Text> : null}
 
       {submissions.map((s) => (
-        <div key={s.id} className="u-card elevated card-pad-tight" style={{ ...S.card, borderRadius: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <Card key={s.id} withBorder radius="lg" shadow="sm">
+          <Group justify="space-between">
             <div>
-              <div style={{ fontWeight: 600 }}>{s.tasklistName}</div>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>{s.date} • Signed: {s.signedBy}</div>
+              <Text fw={600}>{s.tasklistName}</Text>
+              <Text c="dimmed" fz="sm">{s.date} • Signed: {s.signedBy}</Text>
             </div>
-            <span className={`tag ${s.status === "Approved" ? "ok" : s.status === "Rework" ? "warn" : ""}`}>{s.status}</span>
-          </div>
+            <Badge variant="light" color={s.status === "Approved" ? "green" : s.status === "Rework" ? "yellow" : "gray"}>{s.status}</Badge>
+          </Group>
 
-          <div className="table-scroll" style={{ marginTop: 8 }}>
-            <table style={S.table}>
-              <thead>
-                <tr>
-                  <th style={S.th}>
+          <ScrollArea mt="sm">
+            <Table highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>
                     <input
                       type="checkbox"
                       checked={(selection[s.id]?.size || 0) === s.tasks.length}
                       onChange={(e) => {
-                        const all = new Set(e.target.checked ? s.tasks.map(t => t.taskId) : []);
+                        const all = new Set(e.currentTarget.checked ? s.tasks.map((t) => t.taskId) : []);
                         setSelection((prev) => ({ ...prev, [s.id]: all }));
                       }}
                     />
-                  </th>
-                  <th style={S.th}>Task</th>
-                  <th className="hide-sm" style={S.th}>Value</th>
-                  <th className="hide-sm" style={S.th}>Note</th>
-                  <th className="hide-sm" style={S.th}>Photos</th>
-                  <th style={S.th}>Emp Status</th>
-                  <th style={S.th}>Review</th>
-                </tr>
-              </thead>
-              <tbody>
+                  </Table.Th>
+                  <Table.Th>Task</Table.Th>
+                  <Table.Th className="hide-sm">Value</Table.Th>
+                  <Table.Th className="hide-sm">Note</Table.Th>
+                  <Table.Th className="hide-sm">Photos</Table.Th>
+                  <Table.Th>Emp Status</Table.Th>
+                  <Table.Th>Review</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
                 {s.tasks.map((t, i) => {
                   const meta = getTaskMeta(s.tasklistId, t.taskId);
                   return (
-                    <tr key={i}>
-                      <td style={S.td}>
-                        <input
-                          type="checkbox"
-                          checked={selection[s.id]?.has(t.taskId) || false}
-                          onChange={() => toggle(s.id, t.taskId)}
-                        />
-                      </td>
-                      <td style={S.td}><b>{meta.title}</b></td>
-                      <td className="hide-sm" style={S.td}>{t.value !== null && t.value !== undefined ? String(t.value) : "-"}</td>
-                      <td className="hide-sm" style={S.td}>{t.note || "-"}</td>
-                      <td className="hide-sm" style={S.td}>
-                        {(t.photos || []).length ? (t.photos || []).map((p, j) => <span key={j} className="tag">{p}</span>) : "-"}
-                      </td>
-                      <td style={S.td}>
-                        <span className={`tag ${t.status === "Complete" ? "ok" : ""}`}>
-                          {t.na ? "N/A" : t.status}
-                        </span>
-                      </td>
-                      <td style={S.td}>
-                        <span className={`tag ${t.reviewStatus === "Approved" ? "ok" : t.reviewStatus === "Rework" ? "warn" : ""}`}>
+                    <Table.Tr key={i}>
+                      <Table.Td>
+                        <input type="checkbox" checked={selection[s.id]?.has(t.taskId) || false} onChange={() => toggle(s.id, t.taskId)} />
+                      </Table.Td>
+                      <Table.Td><Text fw={600}>{meta.title}</Text></Table.Td>
+                      <Table.Td className="hide-sm">{t.value ?? "-"}</Table.Td>
+                      <Table.Td className="hide-sm">{t.note || "-"}</Table.Td>
+                      <Table.Td className="hide-sm">
+                        {(t.photos || []).length ? (
+                          <Group gap="xs" wrap="wrap">
+                            {(t.photos || []).map((p, j) => (
+                              <Badge key={j} variant="light" leftSection={<IconPhoto size={14} />}>{p}</Badge>
+                            ))}
+                          </Group>
+                        ) : "-"}
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge variant="outline" color={t.status === "Complete" ? "green" : "gray"}>{t.na ? "N/A" : t.status}</Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge variant="outline" color={t.reviewStatus === "Approved" ? "green" : t.reviewStatus === "Rework" ? "yellow" : "gray"}>
                           {t.reviewStatus}
-                        </span>
-                      </td>
-                    </tr>
+                        </Badge>
+                      </Table.Td>
+                    </Table.Tr>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
 
-          <div className="sticky-actions">
-            <button className="u-btn" onClick={() => applyReview(s.id, "Rework")}>Rework Selected</button>
-            <button className="u-btnPrimary" onClick={() => applyReview(s.id, "Approved")}>Approve Selected</button>
-          </div>
-        </div>
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={() => applyReview(s.id, "Rework")}>Rework Selected</Button>
+            <Button onClick={() => applyReview(s.id, "Approved")}>Approve Selected</Button>
+          </Group>
+        </Card>
       ))}
-    </div>
+    </Stack>
   );
 }
 
-// ---------------------- Admin ----------------------
+/** ---------------------- Admin View ---------------------- */
 function AdminView({ tasklists, submissions }) {
   const byBlock = useMemo(() => {
     const acc = {};
@@ -745,55 +557,212 @@ function AdminView({ tasklists, submissions }) {
       acc[k].total += totalSubs.length;
       acc[k].approved += totalSubs.filter((s) => s.status === "Approved").length;
     });
-    return Object.values(acc).map((r) => ({ name: r.name, completion: (r.total ? Math.round((r.approved / r.total) * 100) : 0) }));
+    return Object.values(acc).map((r) => ({ name: r.name, completion: r.total ? Math.round((r.approved / r.total) * 100) : 0 }));
   }, [tasklists, submissions]);
 
   return (
-    <div className="r-grid r-grid-2" style={{ gap: 12 }}>
-      <div className="u-card elevated card-pad-tight" style={S.card}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Completion by Time Block</div>
-        <div className="table-scroll">
-          <table style={S.table}>
-            <thead>
-              <tr>
-                <th style={S.th}>Time Block</th>
-                <th style={S.th}>Completion</th>
-              </tr>
-            </thead>
-            <tbody>
+    <Grid gutter="md">
+      <Grid.Col span={{ base: 12, md: 6 }}>
+        <Card withBorder radius="lg" shadow="sm">
+          <Text fw={600} mb="xs">Completion by Time Block</Text>
+          <Table>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Time Block</Table.Th>
+                <Table.Th>Completion</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
               {byBlock.map((r, i) => (
-                <tr key={i}>
-                  <td style={S.td}>{r.name}</td>
-                  <td style={S.td}>{r.completion}%</td>
-                </tr>
+                <Table.Tr key={i}>
+                  <Table.Td>{r.name}</Table.Td>
+                  <Table.Td>{r.completion}%</Table.Td>
+                </Table.Tr>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </Table.Tbody>
+          </Table>
+        </Card>
+      </Grid.Col>
 
-      <div className="u-card elevated card-pad-tight" style={S.card}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Tasklists</div>
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {tasklists.map((tl) => (
-            <li key={tl.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
-              <div style={{ fontWeight: 500 }}>{tl.name}</div>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>{getTimeBlockLabel(tl.timeBlockId)} • {tl.tasks.length} tasks</div>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <Grid.Col span={{ base: 12, md: 6 }}>
+        <Card withBorder radius="lg" shadow="sm">
+          <Text fw={600} mb="xs">Tasklists</Text>
+          <Stack gap="xs">
+            {tasklists.map((tl) => (
+              <div key={tl.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--mantine-color-gray-3)" }}>
+                <Text fw={500}>{tl.name}</Text>
+                <Text c="dimmed" fz="sm">{getTimeBlockLabel(tl.timeBlockId)} • {tl.tasks.length} tasks</Text>
+              </div>
+            ))}
+          </Stack>
+        </Card>
+      </Grid.Col>
+    </Grid>
+  );
+}
 
-      <div className="u-card card-pad-tight" style={S.card}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Flow Summary</div>
-        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 14, color: "var(--muted)" }}>
-          <li>Employee completes tasks and <b>Sign & Submit</b> → submission appears for Manager.</li>
-          <li>Manager selects rows → <b>Approve Selected</b> or <b>Rework Selected</b>.</li>
-          <li>Rework makes the submission status <b>Rework</b> and shows in Employee’s <b>Review Queue</b>.</li>
-          <li>Employee fixes rework tasks and <b>Resubmit for Review</b>.</li>
-          <li>When all tasks are Approved → submission status becomes <b>Approved</b>.</li>
-        </ol>
-      </div>
-    </div>
+/** ---------------------- Main App (v7 Provider setup) ---------------------- */
+const theme = createTheme({});
+
+export default function App() {
+  // Persisted scheme
+  const [scheme, setScheme] = useLocalStorage({
+    key: "theme",
+    defaultValue: "light", // 'light' | 'dark'
+  });
+
+  const [mode, setMode] = useState("employee");
+  const [activeLocationId, setActiveLocationId] = useState("loc_001");
+
+  // Today’s tasklists
+  const tasklistsToday = useMemo(() => {
+    const dow = new Date().getDay();
+    return MOCK_TASKLISTS.filter((tl) => tl.locationId === activeLocationId && tl.recurrence.includes(dow));
+  }, [activeLocationId]);
+
+  // Working state (per tasklist)
+  const [working, setWorking] = useState(() =>
+    tasklistsToday.reduce((acc, tl) => {
+      acc[tl.id] = tl.tasks.map((t) => ({
+        taskId: t.id, status: "Incomplete", value: null, note: "", photos: [], na: false, reviewStatus: "Pending",
+      }));
+      return acc;
+    }, {})
+  );
+  const [submissions, setSubmissions] = useState([]);
+  const [pinModal, setPinModal] = useState({ open: false, onConfirm: null });
+
+  useEffect(() => {
+    setWorking((prev) => {
+      const next = { ...prev };
+      tasklistsToday.forEach((tl) => {
+        if (!next[tl.id]) {
+          next[tl.id] = tl.tasks.map((t) => ({ taskId: t.id, status: "Incomplete", value: null, note: "", photos: [], na: false, reviewStatus: "Pending" }));
+        }
+      });
+      Object.keys(next).forEach((k) => {
+        if (!tasklistsToday.find((tl) => tl.id === k)) delete next[k];
+      });
+      return next;
+    });
+  }, [tasklistsToday]);
+
+  function updateTaskState(tlId, taskId, patch) {
+    setWorking((prev) => {
+      const next = { ...prev };
+      next[tlId] = next[tlId].map((ti) => (ti.taskId === taskId ? { ...ti, ...(typeof patch === "function" ? patch(ti) : patch) } : ti));
+      return next;
+    });
+  }
+  function handleComplete(tl, task) {
+    const state = working[tl.id].find((s) => s.taskId === task.id);
+    if (!canTaskBeCompleted(task, state)) {
+      alert("Finish required inputs first (photo/note/number in range).");
+      return;
+    }
+    updateTaskState(tl.id, task.id, { status: "Complete", value: state.value ?? true });
+  }
+  function handleUpload(tl, task, file) {
+    updateTaskState(tl.id, task.id, (ti) => ({ photos: [...(ti.photos || []), file.name] }));
+  }
+  function canSubmitTasklist(tl) {
+    const states = working[tl.id];
+    for (const t of tl.tasks) {
+      const st = states.find((s) => s.taskId === t.id);
+      const ok = (st.status === "Complete" || st.na) && canTaskBeCompleted(t, st);
+      if (!ok) return false;
+    }
+    return true;
+  }
+  function signoff(tl) {
+    if (!canSubmitTasklist(tl)) {
+      alert("Please complete all required tasks first.");
+      return;
+    }
+    setPinModal({
+      open: true,
+      onConfirm: (pin) => {
+        const payload = working[tl.id].map((t) => ({ ...t, reviewStatus: "Pending" }));
+        const submission = {
+          id: `ci_${Date.now()}`,
+          tasklistId: tl.id,
+          tasklistName: tl.name,
+          locationId: tl.locationId,
+          date: todayISO(),
+          status: "Pending",
+          signedBy: `PIN-${pin}`,
+          signedAt: new Date().toISOString(),
+          tasks: payload,
+        };
+        setSubmissions((prev) => [submission, ...prev]);
+        setWorking((prev) => ({ ...prev, [tl.id]: prev[tl.id].map((t) => ({ ...t, reviewStatus: "Pending" })) }));
+        setPinModal({ open: false, onConfirm: null });
+        alert("Submitted for manager review.");
+      },
+    });
+  }
+
+  return (
+    <MantineProvider theme={theme} forceColorScheme={scheme}>
+      <AppShell
+        header={{ height: 64 }}
+        padding="md"
+        withBorder={false}
+        styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)" } }}
+      >
+        <AppShell.Header style={{borderBottom: "1px solid var(--mantine-color-gray-3)"}}>
+          <Group h={64} px="md" justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
+            {/* left */}
+            <Group gap="sm">
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: MOCK_COMPANY.brand.primary }} />
+              <Text fw={700}>{MOCK_COMPANY.name}</Text>
+            </Group>
+            {/* right */}
+            <Group gap="xs" wrap="wrap">
+              <SegmentedControl
+                value={mode}
+                onChange={setMode}
+                data={[
+                  { value: "employee", label: "Employee" },
+                  { value: "manager", label: "Manager" },
+                  { value: "admin", label: "Admin" },
+                ]}
+              />
+              <Select
+                value={activeLocationId}
+                onChange={(v) => setActiveLocationId(v)}
+                data={MOCK_LOCATIONS.map((l) => ({ value: l.id, label: l.name }))}
+                w={200}
+              />
+              <ThemeToggle scheme={scheme} setScheme={setScheme} />
+            </Group>
+          </Group>
+        </AppShell.Header>
+
+        <AppShell.Main>
+          <Container size="xl">
+            {mode === "employee" && (
+              <EmployeeView
+                tasklists={tasklistsToday}
+                working={working}
+                updateTaskState={updateTaskState}
+                handleComplete={handleComplete}
+                handleUpload={handleUpload}
+                signoff={signoff}
+                submissions={submissions}
+                setSubmissions={setSubmissions}
+                setWorking={setWorking}
+              />
+            )}
+            {mode === "manager" && (
+              <ManagerView submissions={submissions} setSubmissions={setSubmissions} setWorking={setWorking} />
+            )}
+            {mode === "admin" && <AdminView tasklists={MOCK_TASKLISTS} submissions={submissions} />}
+          </Container>
+        </AppShell.Main>
+
+        <PinDialog opened={pinModal.open} onClose={() => setPinModal({ open: false, onConfirm: null })} onConfirm={pinModal.onConfirm} />
+      </AppShell>
+    </MantineProvider>
   );
 }
