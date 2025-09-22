@@ -160,3 +160,24 @@ html, body, #root { height: 100%; }
   box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--surface) 25%, transparent);
 }
 .card-pad-tight { padding: 12px !important; }
+
+/* ---- Mantine Modal safety overrides ---- */
+.mantine-Modal-inner { 
+  z-index: 10000 !important;   /* above sticky left panel/header */
+}
+
+.mantine-Modal-content {
+  opacity: 1 !important;       /* kill any stuck animation */
+  transform: none !important;
+  visibility: visible !important;
+  background: var(--mantine-color-body, #fff) !important; /* force a solid panel */
+  color: var(--mantine-color-text, #111) !important;
+  box-shadow: var(--mantine-shadow-md, 0 10px 30px rgba(0,0,0,.15)) !important;
+}
+
+/* Paper is the underlying element used inside Modal. Make sure generic utility
+   classes don't accidentally override it to transparent. */
+.mantine-Paper-root {
+  background: var(--mantine-color-body, #fff) !important;
+  color: var(--mantine-color-text, #111) !important;
+}

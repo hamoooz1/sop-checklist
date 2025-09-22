@@ -1,4 +1,3 @@
-import '@mantine/core/styles.css';
 import React, { useMemo, useState, useEffect } from "react";
 import AdminView from "./AdminView";
 import {
@@ -114,7 +113,7 @@ function ThemeToggle({ scheme, setScheme }) {
 function PinDialog({ opened, onClose, onConfirm }) {
   const [pin, setPin] = useState("");
   return (
-    <Modal style={{zIndex: 1000}}opened={opened} onClose={onClose} title="Enter PIN" centered>
+    <Modal zIndex={1000} opened={opened} onClose={onClose} title="Enter PIN" centered withinPortal transitionProps={{duration: 0}} overlayProps={{opacity: 0.25, blur: 2}}>
       <Stack gap="sm">
         <TextInput type="password" placeholder="••••" value={pin} onChange={(e) => setPin(e.target.value)} autoFocus />
         <Group justify="flex-end">
@@ -261,7 +260,14 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
       })}
 
       {/* Review Queue (Rework) */}
-      <Card withBorder radius="lg" shadow="sm">
+      <Card
+        withBorder
+        radius="md"
+        style={{
+          position: "sticky",
+          zIndex: 1,
+          top: 90,
+        }}>
         <Text fw={600} fz="lg" mb="xs">Review Queue (Rework Needed)</Text>
         {submissions.filter((s) => s.status === "Rework").length === 0 ? (
           <Text c="dimmed" fz="sm">No rework requested.</Text>
@@ -544,7 +550,18 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
 }
 
 /** ---------------------- Main App ---------------------- */
-const baseTheme = createTheme({});
+const baseTheme = createTheme({
+  components: {
+    Modal: {
+      defaultProps: {
+        withinPortal: true,
+        zIndex: 10000,
+        transitionProps: { duration: 0 },
+        overlayProps: { opacity: 0.25, blur: 2 },
+      },
+    },
+  },
+});
 
 function AppInner() {
   const { settings } = useSettings();
@@ -659,7 +676,7 @@ function AppInner() {
         header={{ height: 64 }}
         padding="md"
         withBorder={false}
-        styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)", overflow: "hidden" } }}
+        styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)" } }}
       >
         <AppShell.Header style={{ borderBottom: "1px solid var(--mantine-color-gray-3)" }}>
           <Group h={64} px="md" justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
@@ -721,7 +738,7 @@ function AppInner() {
                 <AdminView
                   tasklists={MOCK_TASKLISTS}
                   submissions={submissions}
-                  onBrandColorChange={() => {}}
+                  onBrandColorChange={() => { }}
                 />
               </div>
             )}

@@ -1,10 +1,8 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.jsx'
+import '@mantine/core/styles.css';
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx'; // your app
+import './index.css';        // your own styles AFTER Mantine
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);

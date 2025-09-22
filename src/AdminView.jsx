@@ -54,6 +54,7 @@ export default function AdminView({ tasklists, submissions, onBrandColorChange }
           position: "sticky",
           height: "fit-content",
           zIndex: 1,
+          top: 80,
         }}
       >
         <Text fw={700} mb="xs">Admin Settings</Text>
