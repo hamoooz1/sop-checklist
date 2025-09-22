@@ -27,13 +27,9 @@ import {
 } from "@mantine/core";
 import { useLocalStorage } from "@mantine/hooks";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
+import { SettingsProvider, useSettings } from "./settings-store.jsx";
 
 /** ---------------------- Mock Data ---------------------- */
-const MOCK_COMPANY = { id: "co_001", name: "Saba Foods", brand: { primary: "#0ea5e9" } };
-const MOCK_LOCATIONS = [
-  { id: "loc_001", companyId: "co_001", name: "Main St Diner", timezone: "America/Los_Angeles" },
-  { id: "loc_002", companyId: "co_001", name: "Granville", timezone: "America/Los_Angeles" },
-];
 const TIME_BLOCKS = [
   { id: "open", name: "Open", start: "05:00", end: "10:00" },
   { id: "mid", name: "Mid-Shift", start: "11:00", end: "16:00" },
@@ -118,7 +114,7 @@ function ThemeToggle({ scheme, setScheme }) {
 function PinDialog({ opened, onClose, onConfirm }) {
   const [pin, setPin] = useState("");
   return (
-    <Modal opened={opened} onClose={onClose} title="Enter PIN" centered>
+    <Modal style={{zIndex: 1000}}opened={opened} onClose={onClose} title="Enter PIN" centered>
       <Stack gap="sm">
         <TextInput type="password" placeholder="••••" value={pin} onChange={(e) => setPin(e.target.value)} autoFocus />
         <Group justify="flex-end">
@@ -547,23 +543,29 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
   );
 }
 
-/** ---------------------- Admin View ---------------------- */
+/** ---------------------- Main App ---------------------- */
+const baseTheme = createTheme({});
 
-/** ---------------------- Main App (v7 Provider setup) ---------------------- */
-const theme = createTheme({});
+function AppInner() {
+  const { settings } = useSettings();
 
-export default function App() {
-  const [companyAccent, setCompanyAccent] = useState("#0ea5e9");
-  // Persisted scheme
+  // Persisted scheme (UI preference)
   const [scheme, setScheme] = useLocalStorage({
     key: "theme",
-    defaultValue: "light", // 'light' | 'dark'
+    defaultValue: "light",
   });
 
   const [mode, setMode] = useState("employee");
-  const [activeLocationId, setActiveLocationId] = useState("loc_001");
+  const [activeLocationId, setActiveLocationId] = useState(() => settings.locations?.[0]?.id || "loc_001");
 
-  // Today’s tasklists
+  // Keep activeLocation valid when Admin edits locations
+  useEffect(() => {
+    if (!settings.locations.find((l) => l.id === activeLocationId)) {
+      setActiveLocationId(settings.locations[0]?.id || "");
+    }
+  }, [settings.locations, activeLocationId]);
+
+  // Today’s tasklists (mocked)
   const tasklistsToday = useMemo(() => {
     const dow = new Date().getDay();
     return MOCK_TASKLISTS.filter((tl) => tl.locationId === activeLocationId && tl.recurrence.includes(dow));
@@ -652,20 +654,27 @@ export default function App() {
   }
 
   return (
-    <MantineProvider theme={theme} forceColorScheme={scheme}>
+    <MantineProvider theme={baseTheme} forceColorScheme={scheme}>
       <AppShell
         header={{ height: 64 }}
         padding="md"
         withBorder={false}
         styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)", overflow: "hidden" } }}
       >
-
         <AppShell.Header style={{ borderBottom: "1px solid var(--mantine-color-gray-3)" }}>
           <Group h={64} px="md" justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
             {/* left */}
             <Group gap="sm">
-              <div style={{ width: 28, height: 28, borderRadius: 8, background: companyAccent }} />
-              <Text fw={700}>{MOCK_COMPANY.name}</Text>
+              {settings.company.logo ? (
+                <img
+                  src={settings.company.logo}
+                  alt="Logo"
+                  style={{ width: 28, height: 28, borderRadius: 8, objectFit: "cover" }}
+                />
+              ) : (
+                <div style={{ width: 28, height: 28, borderRadius: 8, background: settings.company.brandColor }} />
+              )}
+              <Text fw={700}>{settings.company.name}</Text>
             </Group>
             {/* right */}
             <Group gap="xs" wrap="wrap">
@@ -681,7 +690,7 @@ export default function App() {
               <Select
                 value={activeLocationId}
                 onChange={(v) => setActiveLocationId(v)}
-                data={MOCK_LOCATIONS.map((l) => ({ value: l.id, label: l.name }))}
+                data={settings.locations.map((l) => ({ value: l.id, label: l.name }))}
                 w={200}
               />
               <ThemeToggle scheme={scheme} setScheme={setScheme} />
@@ -712,10 +721,9 @@ export default function App() {
                 <AdminView
                   tasklists={MOCK_TASKLISTS}
                   submissions={submissions}
-                  onBrandColorChange={(c) => setCompanyAccent(c || "#0ea5e9")}
+                  onBrandColorChange={() => {}}
                 />
               </div>
-
             )}
           </Container>
         </AppShell.Main>
@@ -723,5 +731,13 @@ export default function App() {
         <PinDialog opened={pinModal.open} onClose={() => setPinModal({ open: false, onConfirm: null })} onConfirm={pinModal.onConfirm} />
       </AppShell>
     </MantineProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <SettingsProvider>
+      <AppInner />
+    </SettingsProvider>
   );
 }
