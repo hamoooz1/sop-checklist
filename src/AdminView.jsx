@@ -5,36 +5,21 @@ import {
   NavLink, Grid, Modal, ActionIcon, rem
 } from "@mantine/core";
 import { IconUpload, IconDeviceFloppy, IconTrash, IconPlus, IconSettings } from "@tabler/icons-react";
+import { useSettings } from "./settings-store.jsx";
 
-const LS_KEY = "sop_admin_settings_v1";
-
-const defaultSettings = {
-  company: { name: "FreshFork Hospitality", brandColor: "#0ea5e9", timezone: "America/Los_Angeles", weekStart: "Mon", locale: "en-US", logo: null },
-  locations: [{ id: "loc_001", name: "Main St Diner", timezone: "America/Los_Angeles", managers: [] }],
-  users: [],
-  policies: { photoRetentionDays: 90, requirePhotoForCategories: [], requireNoteForFoodSafety: true },
-  notifications: { dailyDigest: true, reworkAlerts: true, overdueAlerts: true },
-  security: { pinLength: 4, pinExpiryDays: 180, lockoutThreshold: 5, dualSignoff: false },
-  theme: { defaultScheme: "auto", accent: "#0ea5e9" },
-};
-
-export default function AdminView({ tasklists, submissions, onBrandColorChange }) {
+export default function AdminView({ tasklists, submissions }) {
   const [view, setView] = useState("company");
-  const [settings, setSettings] = useState(() => {
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      return raw ? JSON.parse(raw) : defaultSettings;
-    } catch {
-      return defaultSettings;
-    }
-  });
+  const { settings, updateSettings } = useSettings();
+  const [draft, setDraft] = useState(settings);
 
   useEffect(() => {
-    localStorage.setItem(LS_KEY, JSON.stringify(settings));
-    onBrandColorChange?.(settings.company.brandColor);
-  }, [settings, onBrandColorChange]);
+    setDraft(settings);
+  }, [settings]);
 
-  const saveToast = () => alert("Settings saved");
+  const saveDraftToApp = () => {
+    updateSettings(draft);
+    alert("Settings saved");
+  };
 
   return (
     <div
@@ -43,19 +28,13 @@ export default function AdminView({ tasklists, submissions, onBrandColorChange }
         gridTemplateColumns: "minmax(240px, 280px) 1fr",
         gap: "16px",
         alignItems: "start",
-        minHeight: "calc(100dvh - 64px - 16px)", // header 64 + page padding 16
+        minHeight: "calc(100dvh - 64px - 16px)",
       }}
     >
-      {/* Left nav — sticky relative to header */}
       <Card
         withBorder
         radius="md"
-        style={{
-          position: "sticky",
-          height: "fit-content",
-          zIndex: 1,
-          top: 80,
-        }}
+        style={{ position: "sticky", height: "fit-content", zIndex: 1, top: 80 }}
       >
         <Text fw={700} mb="xs">Admin Settings</Text>
         <Stack gap={2}>
@@ -71,22 +50,21 @@ export default function AdminView({ tasklists, submissions, onBrandColorChange }
         </Stack>
       </Card>
 
-      {/* Right pane — fills remaining space and scrolls */}
       <ScrollArea.Autosize
         mah="calc(100dvh - 64px - 16px)"
         type="auto"
         scrollbarSize={8}
         styles={{ viewport: { overflowX: "hidden" } }}
-        style={{ minWidth: 0 }} // IMPORTANT so it can shrink and fill
+        style={{ minWidth: 0 }}
       >
         <div style={{ minWidth: 0 }}>
-          {view === "company" && <CompanyPane settings={settings} setSettings={setSettings} onSave={saveToast} />}
-          {view === "locations" && <LocationsPane settings={settings} setSettings={setSettings} onSave={saveToast} />}
-          {view === "users" && <UsersPane settings={settings} setSettings={setSettings} onSave={saveToast} />}
-          {view === "policies" && <PoliciesPane settings={settings} setSettings={setSettings} onSave={saveToast} />}
-          {view === "notifications" && <NotificationsPane settings={settings} setSettings={setSettings} onSave={saveToast} />}
-          {view === "security" && <SecurityPane settings={settings} setSettings={setSettings} onSave={saveToast} />}
-          {view === "branding" && <BrandingPane settings={settings} setSettings={setSettings} onSave={saveToast} />}
+          {view === "company" && <CompanyPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "locations" && <LocationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "users" && <UsersPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "policies" && <PoliciesPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "notifications" && <NotificationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "security" && <SecurityPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "branding" && <BrandingPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "checklists" && <ComingSoon label="Checklists & Templates" />}
           {view === "data" && <ComingSoon label="Data & Export" />}
         </div>
@@ -129,10 +107,26 @@ function CompanyPane({ settings, setSettings, onSave }) {
           />
         </Group>
         <Group wrap="wrap">
-          <FileButton onChange={(file) => file && setSettings({ ...settings, company: { ...s, logo: file.name } })} accept="image/*">
-            {(props) => <Button leftSection={<IconUpload size={16} />} variant="default" {...props}>Upload logo</Button>}
+          <FileButton
+            onChange={async (file) => {
+              if (!file) return;
+              const dataUrl = await new Promise((res, rej) => {
+                const r = new FileReader();
+                r.onload = () => res(r.result);
+                r.onerror = rej;
+                r.readAsDataURL(file);
+              });
+              setSettings({ ...settings, company: { ...s, logo: dataUrl } });
+            }}
+            accept="image/*"
+          >
+            {(props) => (
+              <Button leftSection={<IconUpload size={16} />} variant="default" {...props}>
+                Upload logo
+              </Button>
+            )}
           </FileButton>
-          {s.logo && <Badge variant="light">{s.logo}</Badge>}
+          {s.logo && <Badge variant="light">Logo selected</Badge>}
         </Group>
         <Divider />
         <Group justify="flex-end">

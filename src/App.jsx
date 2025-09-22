@@ -565,6 +565,10 @@ const baseTheme = createTheme({
 
 function AppInner() {
   const { settings } = useSettings();
+  
+  useEffect(() => {
+    document.documentElement.style.setProperty("--brand", settings.company.brandColor || "#0ea5e9");
+  }, [settings.company.brandColor])
 
   // Persisted scheme (UI preference)
   const [scheme, setScheme] = useLocalStorage({
