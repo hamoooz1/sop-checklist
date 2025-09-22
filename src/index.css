@@ -82,3 +82,7 @@ button:focus-visible {
   background: var(--mantine-color-body, #fff) !important;
   color: var(--mantine-color-text, #111) !important;
 }
+
+.mantine-Combobox-dropdown {
+  z-index: 11000 !important;
+}

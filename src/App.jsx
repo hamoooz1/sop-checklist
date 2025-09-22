@@ -92,6 +92,101 @@ function getTaskMeta(tasklistId, taskId) {
   return tl?.tasks.find((x) => x.id === taskId) || { title: taskId, inputType: "checkbox" };
 }
 
+// --------- Checklist resolution (templates + ad-hoc) ----------
+function weekdayIndexFromISO(dateISO, tz) {
+  try {
+    const parts = dateISO.split("-");
+    const d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0));
+    if (tz) {
+      // Get weekday in target timezone using Intl
+      const fmt = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz });
+      const wk = fmt.format(d); // Sun, Mon, ...
+      return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wk);
+    }
+    return d.getUTCDay();
+  } catch {
+    return new Date().getDay();
+  }
+}
+
+function getTimeBlockLabelFromSettings(settings, id) {
+  const blocks = (settings && settings.checklists && Array.isArray(settings.checklists.timeBlocks))
+    ? settings.checklists.timeBlocks
+    : [];
+  const block = blocks.find((b) => b.id === id);
+  return block ? `${block.name} (${block.start}–${block.end})` : id;
+}
+
+
+/**
+ * settings: full settings from context
+ * locationId: active location
+ * dateISO: "YYYY-MM-DD"
+ * returns array of tasklists for that date/location
+ */
+function resolveTasklistsForDay(settings, locationId, dateISO) {
+  const cl = settings.checklists || { timeBlocks: [], templates: [], overrides: [] };
+  const tz = settings.company?.timezone || "UTC";
+  const dow = weekdayIndexFromISO(dateISO, tz);
+
+  const tMap = Object.fromEntries((cl.timeBlocks || []).map(tb => [tb.id, tb]));
+
+  const templates = (cl.templates || []).filter(tpl =>
+    (tpl.active !== false) &&
+    tpl.locationId === locationId &&
+    Array.isArray(tpl.recurrence) &&
+    tpl.recurrence.includes(dow)
+  );
+
+  const overrides = (cl.overrides || []).filter(ovr =>
+    ovr.locationId === locationId &&
+    ovr.date === dateISO
+  );
+
+  const byTB = {};
+  for (const ovr of overrides) {
+    if (!byTB[ovr.timeBlockId]) byTB[ovr.timeBlockId] = [];
+    byTB[ovr.timeBlockId].push(...(ovr.tasks || []));
+  }
+
+  const tasklists = templates.map((tpl) => {
+    const extra = byTB[tpl.timeBlockId] || [];
+    const mergedTasks = [...(tpl.tasks || []), ...extra].map(t => ({
+      id: t.id ?? `t_${Math.random().toString(36).slice(2, 8)}`,
+      title: t.title || "Task",
+      category: t.category || "",
+      inputType: t.inputType || "checkbox",
+      min: typeof t.min === "number" ? t.min : null,
+      max: typeof t.max === "number" ? t.max : null,
+      photoRequired: !!t.photoRequired,
+      noteRequired: !!t.noteRequired,
+      allowNA: t.allowNA !== false,
+      priority: typeof t.priority === "number" ? t.priority : 3
+    }));
+
+    return {
+      id: tpl.id,
+      locationId: tpl.locationId,
+      name: tpl.name,
+      timeBlockId: tpl.timeBlockId,
+      recurrence: tpl.recurrence || [],
+      requiresApproval: tpl.requiresApproval !== false,    // default true
+      signoffMethod: tpl.signoffMethod || "PIN",
+      tasks: mergedTasks
+    };
+  });
+
+  // Nice sorting by time block start time if available
+  tasklists.sort((a, b) => {
+    const A = tMap[a.timeBlockId]?.start || "00:00";
+    const B = tMap[b.timeBlockId]?.start || "00:00";
+    return A.localeCompare(B);
+  });
+
+  return tasklists;
+}
+
+
 /** ---------------------- Theme toggle (prop-driven) ---------------------- */
 function ThemeToggle({ scheme, setScheme }) {
   const next = scheme === "dark" ? "light" : "dark";
@@ -113,7 +208,7 @@ function ThemeToggle({ scheme, setScheme }) {
 function PinDialog({ opened, onClose, onConfirm }) {
   const [pin, setPin] = useState("");
   return (
-    <Modal zIndex={1000} opened={opened} onClose={onClose} title="Enter PIN" centered withinPortal transitionProps={{duration: 0}} overlayProps={{opacity: 0.25, blur: 2}}>
+    <Modal zIndex={1000} opened={opened} onClose={onClose} title="Enter PIN" centered withinPortal transitionProps={{ duration: 0 }} overlayProps={{ opacity: 0.25, blur: 2 }}>
       <Stack gap="sm">
         <TextInput type="password" placeholder="••••" value={pin} onChange={(e) => setPin(e.target.value)} autoFocus />
         <Group justify="flex-end">
@@ -141,7 +236,18 @@ function EvidenceRow({ state }) {
 }
 
 /** ---------------------- Employee View ---------------------- */
-function EmployeeView({ tasklists, working, updateTaskState, handleComplete, handleUpload, signoff, submissions, setSubmissions, setWorking }) {
+function EmployeeView({
+  tasklists,
+  working,
+  updateTaskState,
+  handleComplete,
+  handleUpload,
+  signoff,
+  submissions,
+  setSubmissions,
+  setWorking,
+  settings,
+}) {
   return (
     <Stack gap="md">
       <Text fw={700} fz="lg">Today</Text>
@@ -160,8 +266,12 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
             <Group justify="space-between" align="center">
               <div>
                 <Text fw={600}>{tl.name}</Text>
-                <Text c="dimmed" fz="sm">{getTimeBlockLabel(tl.timeBlockId)}</Text>
-                <Badge mt={6} variant="light">Progress: {done}/{total} ({pct(done, total)}%)</Badge>
+                <Text c="dimmed" fz="sm">
+                  {getTimeBlockLabelFromSettings(settings, tl.timeBlockId)}
+                </Text>
+                <Badge mt={6} variant="light">
+                  Progress: {done}/{total} ({pct(done, total)}%)
+                </Badge>
               </div>
               <Button onClick={() => signoff(tl)} disabled={!canSubmit}>Sign & Submit</Button>
             </Group>
@@ -184,18 +294,33 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                     <Grid align="center">
                       <Grid.Col span={{ base: 12, sm: 6 }}>
                         <Group gap="sm">
-                          <Badge radius="xl" variant="outline" color={isComplete ? "green" : "gray"} leftSection={isComplete ? <IconCheck size={14} /> : null}>
+                          <Badge
+                            radius="xl"
+                            variant="outline"
+                            color={isComplete ? "green" : "gray"}
+                            leftSection={isComplete ? <IconCheck size={14} /> : null}
+                          >
                             {isComplete ? "Completed" : "Task"}
                           </Badge>
                           <div>
                             <Text fw={600} c={isComplete ? "green.9" : undefined}>{task.title}</Text>
-                            <Text c={isComplete ? "green.9" : "dimmed"} fz="sm">
+                            <Text c={isComplete ? "green.9" : "dimmed" } fz="sm">
                               {task.category} • {task.inputType}
                               {task.photoRequired ? " • Photo required" : ""}
                               {task.noteRequired ? " • Note required" : ""}
                             </Text>
                             {state.reviewStatus && (
-                              <Badge mt={6} variant="outline" color={state.reviewStatus === "Approved" ? "green" : state.reviewStatus === "Rework" ? "yellow" : "gray"}>
+                              <Badge
+                                mt={6}
+                                variant="outline"
+                                color={
+                                  state.reviewStatus === "Approved"
+                                    ? "green"
+                                    : state.reviewStatus === "Rework"
+                                    ? "yellow"
+                                    : "gray"
+                                }
+                              >
                                 {state.reviewStatus}
                               </Badge>
                             )}
@@ -259,15 +384,7 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
         );
       })}
 
-      {/* Review Queue (Rework) */}
-      <Card
-        withBorder
-        radius="md"
-        style={{
-          position: "sticky",
-          zIndex: 1,
-          top: 90,
-        }}>
+      <Card withBorder radius="md" style={{ position: "sticky", zIndex: 1, top: 90 }}>
         <Text fw={600} fz="lg" mb="xs">Review Queue (Rework Needed)</Text>
         {submissions.filter((s) => s.status === "Rework").length === 0 ? (
           <Text c="dimmed" fz="sm">No rework requested.</Text>
@@ -280,6 +397,10 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
                 s={s}
                 setSubmissions={setSubmissions}
                 setWorking={setWorking}
+                getTaskMeta={(tasklistId, taskId) => {
+                  const tl = tasklists.find((x) => x.id === tasklistId);
+                  return tl?.tasks.find((t) => t.id === taskId) || { title: taskId, inputType: "checkbox" };
+                }}
               />
             ))
         )}
@@ -288,7 +409,8 @@ function EmployeeView({ tasklists, working, updateTaskState, handleComplete, han
   );
 }
 
-function EmployeeReworkCard({ s, setSubmissions, setWorking }) {
+
+function EmployeeReworkCard({ s, setSubmissions, setWorking, getTaskMeta }) {
   function updateSubmissionTask(submissionId, taskId, patch) {
     setSubmissions((prev) =>
       prev.map((sx) => {
@@ -306,9 +428,8 @@ function EmployeeReworkCard({ s, setSubmissions, setWorking }) {
     setSubmissions((prev) =>
       prev.map((sx) => {
         if (sx.id !== submissionId) return sx;
-        const tl = getTasklistById(sx.tasklistId);
         const tasks = sx.tasks.map((t) => {
-          const meta = tl.tasks.find((x) => x.id === t.taskId) || {};
+          const meta = getTaskMeta(sx.tasklistId, t.taskId);
           const p = decidePatch(t, meta);
           return p ? { ...t, ...p } : t;
         });
@@ -316,6 +437,7 @@ function EmployeeReworkCard({ s, setSubmissions, setWorking }) {
       })
     );
   }
+
   function recomputeSubmissionStatus(submissionId) {
     setSubmissions((prev) =>
       prev.map((sx) => {
@@ -428,7 +550,7 @@ function EmployeeReworkCard({ s, setSubmissions, setWorking }) {
 }
 
 /** ---------------------- Manager View ---------------------- */
-function ManagerView({ submissions, setSubmissions, setWorking }) {
+function ManagerView({ submissions, setSubmissions, setWorking, getTaskMeta }) {
   const [selection, setSelection] = useState({});
 
   function toggle(subId, taskId) {
@@ -549,6 +671,7 @@ function ManagerView({ submissions, setSubmissions, setWorking }) {
   );
 }
 
+
 /** ---------------------- Main App ---------------------- */
 const baseTheme = createTheme({
   components: {
@@ -565,7 +688,7 @@ const baseTheme = createTheme({
 
 function AppInner() {
   const { settings } = useSettings();
-  
+
   useEffect(() => {
     document.documentElement.style.setProperty("--brand", settings.company.brandColor || "#0ea5e9");
   }, [settings.company.brandColor])
@@ -586,11 +709,21 @@ function AppInner() {
     }
   }, [settings.locations, activeLocationId]);
 
-  // Today’s tasklists (mocked)
+  // Today’s tasklists (from admin templates + ad-hoc)
   const tasklistsToday = useMemo(() => {
-    const dow = new Date().getDay();
-    return MOCK_TASKLISTS.filter((tl) => tl.locationId === activeLocationId && tl.recurrence.includes(dow));
-  }, [activeLocationId]);
+    const today = new Date().toISOString().slice(0, 10);
+    return resolveTasklistsForDay(settings, activeLocationId, today);
+  }, [settings, activeLocationId]);
+
+  // Helpers now read from today's resolved lists
+  function getTasklistById(id) {
+    return tasklistsToday.find((tl) => tl.id === id);
+  }
+  function getTaskMetaToday(tasklistId, taskId) {
+    const tl = tasklistsToday.find((x) => x.id === tasklistId);
+    return tl?.tasks.find((t) => t.id === taskId) || { title: taskId, inputType: "checkbox" };
+  }
+
 
   // Working state (per tasklist)
   const [working, setWorking] = useState(() =>
@@ -732,11 +865,18 @@ function AppInner() {
                 submissions={submissions}
                 setSubmissions={setSubmissions}
                 setWorking={setWorking}
+                settings={settings}
               />
             )}
             {mode === "manager" && (
-              <ManagerView submissions={submissions} setSubmissions={setSubmissions} setWorking={setWorking} />
+              <ManagerView
+                submissions={submissions}
+                setSubmissions={setSubmissions}
+                setWorking={setWorking}
+                getTaskMeta={getTaskMetaToday}
+              />
             )}
+
             {mode === "admin" && (
               <div style={{ paddingInline: "1px", paddingTop: 0, paddingBottom: "16px" }}>
                 <AdminView
