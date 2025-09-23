@@ -335,10 +335,24 @@ function EmployeeView({
                             <NumberInput
                               placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
                               value={state.value ?? ""}
-                              onChange={(v) => updateTaskState(tl.id, task.id, { value: Number(v) })}
+                              onChange={async (v) => {
+                                const val = Number(v);
+                                updateTaskState(tl.id, task.id, { value: val }); // optimistic UI
+                                try {
+                                  const subId = await ensureDraftSubmissionId({
+                                    tlId: tl.id, locationId: activeLocationId, employee: currentEmployee
+                                  });
+                                  await saveTaskPatch({
+                                    submissionId: subId,
+                                    taskId: task.id,
+                                    patch: { value: String(val) }
+                                  });
+                                } catch (e) { console.error(e); }
+                              }}
                               disabled={isComplete}
                               style={{ minWidth: rem(92) }}
                             />
+
                           )}
 
                           <Button
@@ -362,17 +376,45 @@ function EmployeeView({
                           <TextInput
                             placeholder="Add note"
                             value={state.note ?? ""}
-                            onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
+                            onChange={async (e) => {
+                              const note = e.target.value;
+                              updateTaskState(tl.id, task.id, { note });
+                              try {
+                                const subId = await ensureDraftSubmissionId({
+                                  tlId: tl.id, locationId: activeLocationId, employee: currentEmployee
+                                });
+                                await saveTaskPatch({
+                                  submissionId: subId,
+                                  taskId: task.id,
+                                  patch: { note }
+                                });
+                              } catch (e) { console.error(e); }
+                            }}
                             disabled={isComplete && !task.noteRequired}
                             style={{ minWidth: rem(180) }}
                           />
 
+
                           <Switch
                             checked={!!state.na}
-                            onChange={(e) => updateTaskState(tl.id, task.id, { na: e.currentTarget.checked })}
+                            onChange={async (e) => {
+                              const na = e.currentTarget.checked;
+                              updateTaskState(tl.id, task.id, { na });
+                              try {
+                                const subId = await ensureDraftSubmissionId({
+                                  tlId: tl.id, locationId: activeLocationId, employee: currentEmployee
+                                });
+                                await saveTaskPatch({
+                                  submissionId: subId,
+                                  taskId: task.id,
+                                  patch: { na }
+                                });
+                              } catch (e) { console.error(e); }
+                            }}
                             disabled={isComplete}
                             label="N/A"
                           />
+
                         </Group>
                       </Grid.Col>
                     </Grid>
@@ -970,6 +1012,68 @@ function AppInner() {
   // ---------- Supabase helpers ----------
   const EVIDENCE_BUCKET = "evidence";
 
+  async function fetchSubmissionWithTasks(id, tasklistsToday) {
+    const { data, error } = await supabase
+      .from("submission")
+      .select(`
+        id, tasklist_id, location_id, date, status, signed_by, submitted_by, signed_at,
+        tasks:submission_task (
+          task_id, status, na, value, note, photos, review_status, review_note, rework_count
+        )
+      `)
+      .eq("id", id)
+      .single();
+    if (error) throw error;
+  
+    const tlName = (tasklistsToday.find(tl => tl.id === data.tasklist_id)?.name) || data.tasklist_id;
+  
+    return {
+      id: data.id,
+      tasklistId: data.tasklist_id,
+      tasklistName: tlName,
+      locationId: data.location_id,
+      date: data.date,
+      status: data.status,
+      signedBy: data.signed_by,
+      submittedBy: data.submitted_by,
+      signedAt: data.signed_at,
+      tasks: (data.tasks || []).map(t => ({
+        taskId: t.task_id,
+        status: t.status,
+        na: t.na,
+        value: t.value == null ? null : (Number.isNaN(Number(t.value)) ? t.value : Number(t.value)),
+        note: t.note || "",
+        photos: t.photos || [],
+        reviewStatus: t.review_status || "Pending",
+        reviewNote: t.review_note || null,
+        reworkCount: t.rework_count || 0,
+      })),
+    };
+  }
+  
+
+  async function ensureDraftSubmissionId({ tlId, locationId, employee }) {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data, error } = await supabase.rpc('get_or_create_draft_submission', {
+      p_tasklist_id: tlId,
+      p_location_id: locationId,
+      p_date: today,
+      p_submitted_by: employee || null,
+    });
+    if (error) throw error;
+    return data; // uuid string
+  }
+
+  async function saveTaskPatch({ submissionId, taskId, patch }) {
+    const row = { submission_id: submissionId, task_id: taskId, ...patch };
+    const { error } = await supabase
+      .from('submission_task')
+      .upsert(row, { onConflict: 'submission_id,task_id' });
+    if (error) throw error;
+  }
+
+
+
   async function uploadEvidenceForTask({ file, locationId, tlId, taskId }) {
     const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
     const path = `${locationId || 'loc'}/${tlId}/${taskId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
@@ -993,39 +1097,24 @@ function AppInner() {
     if (!exists) setActiveLocationId(locations[0].id);
   }, [locations, activeLocationId, setActiveLocationId]);
 
-  async function persistSubmissionToDB({ tl, pin, activeLocationId, currentEmployee, working }) {
-    const { data: sub, error: subErr } = await supabase
+  async function persistSubmissionToDB({ tl, pin, activeLocationId, currentEmployee }) {
+    const subId = await ensureDraftSubmissionId({
+      tlId: tl.id, locationId: activeLocationId, employee: currentEmployee
+    });
+  
+    const { error } = await supabase
       .from("submission")
-      .insert({
-        tasklist_id: tl.id,
-        location_id: activeLocationId,                 // UUID from DB
-        date: new Date().toISOString().slice(0, 10),   // 'YYYY-MM-DD'
-        status: "Pending",
+      .update({
         signed_by: `PIN-${pin}`,
-        submitted_by: currentEmployee,
-        signed_at: new Date().toISOString(),
+        signed_at: new Date().toISOString()
+        // status stays 'Pending' for manager review
       })
-      .select()
-      .single();
-
-    if (subErr) throw subErr;
-
-    const rows = (working[tl.id] || []).map((t) => ({
-      submission_id: sub.id,
-      task_id: t.taskId,
-      status: t.status,
-      na: !!t.na,
-      value: t.value == null ? null : String(t.value),
-      note: t.note || null,
-      photos: t.photos ?? [],
-      review_status: "Pending",
-    }));
-
-    const { error: tasksErr } = await supabase.from("submission_task").insert(rows);
-    if (tasksErr) throw tasksErr;
-
-    return sub.id;
+      .eq("id", subId);
+  
+    if (error) throw error;
+    return subId;
   }
+  
 
   const { settings } = useSettings();
   const [currentEmployee, setCurrentEmployee] = useState("Employee A");
@@ -1291,30 +1380,72 @@ function AppInner() {
     });
   }
 
-  function handleComplete(tl, task) {
+  async function handleComplete(tl, task) {
     const list = working[tl.id] || [];
     const state = list.find((s) => s.taskId === task.id) || {
       status: "Incomplete", value: null, note: "", photos: [], na: false, reviewStatus: "Pending",
     };
-    if (!canTaskBeCompleted(task, state)) { alert("Finish required inputs first."); return; }
-    updateTaskState(tl.id, task.id, { status: "Complete", value: state.value ?? true });
+    if (!canTaskBeCompleted(task, state)) {
+      alert("Finish required inputs first.");
+      return;
+    }
+  
+    const next = { status: "Complete", value: state.value ?? true };
+    updateTaskState(tl.id, task.id, next); // optimistic
+  
+    try {
+      const subId = await ensureDraftSubmissionId({
+        tlId: tl.id, locationId: activeLocationId, employee: currentEmployee
+      });
+      await saveTaskPatch({
+        submissionId: subId,
+        taskId: task.id,
+        patch: {
+          ...next,
+          na: !!state.na,
+          note: state.note || null,
+          photos: state.photos || [],
+          review_status: "Pending"
+        }
+      });
+    } catch (e) {
+      console.error(e);
+      alert(`Could not save: ${e.message}`);
+    }
   }
   
 
 
 
+
   async function handleUpload(tl, task, file) {
     try {
-      const ext = file.name.split(".").pop() || "jpg";
-      const path = `${activeLocationId || "loc"}/${tl.id}/${task.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `${activeLocationId}/${tl.id}/${task.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
       const { error } = await supabase.storage.from(EVIDENCE_BUCKET).upload(path, file, { upsert: false });
       if (error) throw error;
+  
+      // local
       updateTaskState(tl.id, task.id, (ti) => ({ photos: [...(ti.photos || []), path] }));
+  
+      // db
+      const subId = await ensureDraftSubmissionId({
+        tlId: tl.id, locationId: activeLocationId, employee: currentEmployee
+      });
+      // use the local state we just updated
+      const current = (working[tl.id] || []).find(x => x.taskId === task.id);
+      const photos = (current && current.photos) ? current.photos : [path];
+      await saveTaskPatch({
+        submissionId: subId,
+        taskId: task.id,
+        patch: { photos }
+      });
     } catch (e) {
       console.error(e);
       alert(`Upload failed: ${e.message}`);
     }
   }
+  
 
   function canSubmitTasklist(tl) {
     const states = working[tl.id] || [];
@@ -1330,14 +1461,24 @@ function AppInner() {
 
   async function signoff(tl) {
     if (!canSubmitTasklist(tl)) { alert("Please complete all required tasks first."); return; }
+  
     setPinModal({
       open: true,
       onConfirm: async (pin) => {
         try {
           const realId = await persistSubmissionToDB({ tl, pin, activeLocationId, currentEmployee, working });
-          // optional: re-fetch submissions instead of keeping any local cache
-          // trigger reload:
-          // setReloadKey(k => k+1) or call the fetch function again
+  
+          // pull the server copy we just created
+          const submitted = await fetchSubmissionWithTasks(realId, tasklistsToday);
+  
+          // prepend to the list you render in Manager view / review queue
+          setSubmissions(prev => [submitted, ...prev]);
+  
+          // clear working state for that template (so the employee sees a fresh list)
+          setWorking(prev => ({ ...prev, [tl.id]: (prev[tl.id] || []).map(t => ({
+            ...t, status: "Incomplete", value: null, note: "", photos: [], na: false, reviewStatus: "Pending"
+          })) }));
+  
           alert("Submitted for manager review.");
         } catch (err) {
           console.error(err);
@@ -1349,6 +1490,7 @@ function AppInner() {
     });
   }
   
+
 
   useEffect(() => {
     settings.__seedDemo = () =>
