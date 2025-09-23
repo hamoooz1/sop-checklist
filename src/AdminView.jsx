@@ -66,7 +66,15 @@ export default function AdminView({ tasklists, submissions }) {
           {view === "security" && <SecurityPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "branding" && <BrandingPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "checklists" && <ChecklistsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "data" && <ComingSoon label="Data & Export" />}
+          {view === "data" && (
+            <DataPane
+              settings={draft}
+              submissions={submissions}
+              onImportSettings={(json) => setDraft(json)}
+              onSeedDemo={settings?.__seedDemo}
+            />
+          )}
+
         </div>
       </ScrollArea.Autosize>
     </div>
@@ -483,7 +491,7 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
       name: "",
       locationId: settings.locations?.[0]?.id || "",
       timeBlockId: stores.timeBlocks?.[0]?.id || "",
-      recurrence: [0,1,2,3,4,5,6],
+      recurrence: [0, 1, 2, 3, 4, 5, 6],
       tasks: []
     };
   }
@@ -495,7 +503,7 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
   function initAdhocDraft(defaultLocation) {
     return {
       id: makeId("ovr"),
-      date: new Date().toISOString().slice(0,10),
+      date: new Date().toISOString().slice(0, 10),
       locationId: defaultLocation || "",
       timeBlockId: stores.timeBlocks?.[0]?.id || "",
       tasks: []
@@ -503,7 +511,7 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
   }
 
   function makeId(prefix) {
-    return `${prefix}_${Math.random().toString(36).slice(2,8)}_${Date.now().toString(36)}`;
+    return `${prefix}_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`;
   }
 
   // Save helpers on settings
@@ -708,7 +716,7 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
               </Group>
               <Select
                 label="Days of week (0=Sun...6=Sat)"
-                data={["0","1","2","3","4","5","6"].map(x => ({ value: x, label: x }))}
+                data={["0", "1", "2", "3", "4", "5", "6"].map(x => ({ value: x, label: x }))}
                 value={tplDraft.recurrence.map(String)}
                 onChange={(arr) => setTplDraft({ ...tplDraft, recurrence: (arr || []).map(x => Number(x)) })}
                 multiple
@@ -870,7 +878,7 @@ function TaskEditor({ tasks, onAdd, onChange, onRemove }) {
                 <Select
                   value={t.inputType}
                   onChange={(v) => onChange(t.id, { inputType: v })}
-                  data={["checkbox","number","text"].map(x => ({ value: x, label: x }))}
+                  data={["checkbox", "number", "text"].map(x => ({ value: x, label: x }))}
                   comboboxProps={{ withinPortal: true, zIndex: 11000 }}
                 />
               </Table.Td>
@@ -907,7 +915,7 @@ function TaskEditor({ tasks, onAdd, onChange, onRemove }) {
             label="Type"
             value={draft.inputType}
             onChange={(v) => setDraft({ ...draft, inputType: v })}
-            data={["checkbox","number","text"].map(x => ({ value: x, label: x }))}
+            data={["checkbox", "number", "text"].map(x => ({ value: x, label: x }))}
             comboboxProps={{ withinPortal: true, zIndex: 11000 }}
           />
           <NumberInput label="Min" value={draft.min ?? ""} onChange={(v) => setDraft({ ...draft, min: v === "" ? null : Number(v) })} style={{ width: rem(100) }} />
@@ -928,6 +936,54 @@ function ComingSoon({ label }) {
     <Card withBorder radius="md">
       <Text fw={700} mb="sm">{label}</Text>
       <Text c="dimmed">Coming soon</Text>
+    </Card>
+  );
+}
+
+function DataPane({ settings, submissions, onImportSettings, onSeedDemo }) {
+  const download = (filename, obj) => {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = (file) => {
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const json = JSON.parse(String(r.result));
+        onImportSettings(json);
+        alert("Settings imported");
+      } catch {
+        alert("Invalid JSON");
+      }
+    };
+    r.readAsText(file);
+  };
+
+  return (
+    <Card withBorder radius="md">
+      <Text fw={700} mb="sm">Data & Export</Text>
+      <Stack gap="sm">
+        <Group>
+          <Button onClick={() => download("settings.json", settings)}>Export settings</Button>
+          <FileButton onChange={handleImport} accept="application/json">
+            {(props) => <Button variant="default" {...props}>Import settings</Button>}
+          </FileButton>
+        </Group>
+
+        <Group>
+          <Button onClick={() => download("submissions.json", submissions)}>Export submissions</Button>
+          <Button variant="default" onClick={() => onSeedDemo?.()}>Seed demo submissions</Button>
+        </Group>
+
+        <Text c="dimmed" fz="sm">
+          Use “Seed demo submissions” to generate realistic historical data for the Manager Dashboard/filters.
+        </Text>
+      </Stack>
     </Card>
   );
 }

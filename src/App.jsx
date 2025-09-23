@@ -621,14 +621,23 @@ function ManagerView({
   const totals = filtered.reduce(
     (acc, s) => {
       for (const t of s.tasks) {
-        const done = t.na || t.status === "Complete";
-        if (done) acc.totalTasksCompleted += 1;
+        const approved = t.reviewStatus === "Approved";
+        const isNA = !!t.na;
+
+        // Count a task as complete ONLY once when finally approved (or N/A)
+        if (approved || isNA) acc.totalTasksCompleted += 1;
+
+        // Current rework queue count = tasks currently marked Rework
         if (t.reviewStatus === "Rework") acc.totalRework += 1;
+
+        // Tasks that went through rework at any point (for reporting)
+        if (t.wasReworked) acc.totalReworkedHistorical += 1;
       }
       return acc;
     },
-    { totalTasksCompleted: 0, totalRework: 0 }
+    { totalTasksCompleted: 0, totalRework: 0, totalReworkedHistorical: 0 }
   );
+
 
   const byEmployeeMap = new Map();
   for (const s of filtered) {
@@ -636,7 +645,8 @@ function ManagerView({
     if (!byEmployeeMap.has(emp)) byEmployeeMap.set(emp, { employee: emp, completed: 0 });
     const row = byEmployeeMap.get(emp);
     for (const t of s.tasks) {
-      if (t.na || t.status === "Complete") row.completed += 1;
+      if (t.na || t.reviewStatus === "Approved") row.completed += 1;
+      if (t.wasReworked) row.reworked += 1; // optional, if you want to visualize it later
     }
   }
   const byEmployee = Array.from(byEmployeeMap.values()).sort(
@@ -652,18 +662,51 @@ function ManagerView({
       return { ...prev, [subId]: cur };
     });
   }
-  function applyReview(subId, review) {
+  function applyReview(subId, review, note) {
     setSubmissions((prev) =>
       prev.map((s) => {
         if (s.id !== subId) return s;
-        const sel = selection[subId] || new Set();
-        const tasks = s.tasks.map((t) =>
-          sel.has(t.taskId) ? { ...t, reviewStatus: review } : t
-        );
+
+        // If nothing selected, treat as "all" (used by Approve ALL button)
+        const sel = selection[s.id] || new Set(s.tasks.map(t => t.taskId));
+
+        const tasks = s.tasks.map((t) => {
+          if (!sel.has(t.taskId)) return t;
+
+          // Update review status in-place; do NOT create any new task rows
+          const base = {
+            ...t,
+            reviewStatus: review,
+            // stamp/append a rework reason (keep last for quick view, keep history for audit)
+            reviewNote: review === "Rework" ? (note || t.reviewNote || "") : t.reviewNote,
+            reworkHistory: Array.isArray(t.reworkHistory) ? t.reworkHistory : [],
+          };
+
+          if (review === "Rework") {
+            const count = (t.reworkCount ?? 0) + 1;
+            base.reworkCount = count;
+            base.wasReworked = true;
+            base.reworkHistory = [
+              ...base.reworkHistory,
+              { at: new Date().toISOString(), note: note || "" }
+            ];
+            // employee must fix; keep employee status as-is (Complete/Incomplete) until they resubmit
+          }
+
+          if (review === "Approved") {
+            // final approval – still the SAME task instance
+            // (no extra bookkeeping needed here)
+          }
+
+          return base;
+        });
+
+        // recompute submission holistically
         const hasRework = tasks.some((t) => t.reviewStatus === "Rework");
         const allApproved = tasks.length > 0 && tasks.every((t) => t.reviewStatus === "Approved");
-        const status = hasRework ? "Rework" : allApproved ? "Approved" : "Pending";
+        const status = hasRework ? "Rework" : (allApproved ? "Approved" : "Pending");
 
+        // mirror back into "working" so the employee sees state
         setWorking((prevW) => {
           const list = prevW[s.tasklistId];
           if (!list) return prevW;
@@ -679,8 +722,10 @@ function ManagerView({
         return { ...s, tasks, status };
       })
     );
+
     setSelection((prev) => ({ ...prev, [subId]: new Set() }));
   }
+
 
   return (
     <Stack gap="md">
@@ -832,6 +877,19 @@ function ManagerView({
                               {t.reviewStatus}
                             </Badge>
                           </Table.Td>
+                          <Table.Td>
+                            <Badge
+                              variant="outline"
+                              color={t.reviewStatus === "Approved" ? "green" : t.reviewStatus === "Rework" ? "yellow" : "gray"}
+                            >
+                              {t.reviewStatus}
+                            </Badge>
+                            {(t.reworkCount ?? 0) > 0 && (
+                              <Text c="dimmed" fz="xs" mt={4}>
+                                Reworked ×{t.reworkCount}{t.reviewNote ? ` — ${t.reviewNote}` : ""}
+                              </Text>
+                            )}
+                          </Table.Td>
                         </Table.Tr>
                       );
                     })}
@@ -861,6 +919,13 @@ function ManagerView({
                 <Text fw={700} fz="xl">{totals.totalRework}</Text>
               </Card>
             </Grid.Col>
+            <Grid.Col span={{ base: 12, md: 3 }}>
+              <Card withBorder radius="md">
+                <Text c="dimmed" fz="sm">Tasks ever reworked</Text>
+                <Text fw={700} fz="xl">{totals.totalReworkedHistorical}</Text>
+              </Card>
+            </Grid.Col>
+
           </Grid>
 
           <Card withBorder radius="md" mt="md" p="md" style={{ height: 360 }}>
@@ -941,6 +1006,68 @@ function AppInner() {
     const tl = tasklistsToday.find((x) => x.id === tasklistId);
     return tl?.tasks.find((t) => t.id === taskId) || { title: taskId, inputType: "checkbox" };
   }
+
+  // SEED INFO -------------------------------------------
+  function seedDemoSubmissions({ days = 45, perDay = [0, 3], employees = [] } = {}) {
+    const names = employees.length ? employees : ["Employee A", "Employee B", "Employee C"];
+    const all = [];
+    const today = new Date();
+
+    // Pick tasklists once (current settings & location); if none, bail
+    const baseLists = tasklistsToday.length ? tasklistsToday : [];
+    if (!baseLists.length) { alert("No templates/time blocks to seed from."); return; }
+
+    const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+    const dayISO = (d) => new Date(d).toISOString().slice(0, 10);
+
+    for (let i = 0; i < days; i++) {
+      const d = new Date(today); d.setDate(today.getDate() - i);
+      const n = randInt(perDay[0], perDay[1]);
+      for (let j = 0; j < n; j++) {
+        const tl = baseLists[randInt(0, baseLists.length - 1)];
+        const tasks = tl.tasks.map(t => {
+          const statusRoll = Math.random();
+          const complete = statusRoll > 0.2; // 80% complete
+          const reviewRoll = Math.random();
+          const reviewStatus = complete ? (reviewRoll > 0.15 ? "Approved" : "Rework") : "Pending";
+          const base = {
+            taskId: t.id,
+            status: complete ? "Complete" : "Incomplete",
+            na: false,
+            photos: [],
+            note: (Math.random() > 0.7 ? "Checked" : ""),
+            reviewStatus
+          };
+          if (t.inputType === "number") {
+            const min = typeof t.min === "number" ? t.min : 0;
+            const max = typeof t.max === "number" ? t.max : min + 10;
+            base.value = randInt(min, max);
+          } else {
+            base.value = complete ? true : null;
+          }
+          return base;
+        });
+
+        const signed = names[randInt(0, names.length - 1)];
+        all.push({
+          id: `ci_${Date.now()}_${i}_${j}_${Math.random().toString(36).slice(2, 6)}`,
+          tasklistId: tl.id,
+          tasklistName: tl.name,
+          locationId: tl.locationId,
+          date: dayISO(d),
+          status: tasks.every(t => t.reviewStatus === "Approved") ? "Approved"
+            : tasks.some(t => t.reviewStatus === "Rework") ? "Rework" : "Pending",
+          signedBy: `PIN-${randInt(1000, 9999)}`,
+          submittedBy: signed,
+          signedAt: new Date(d).toISOString(),
+          tasks
+        });
+      }
+    }
+    setSubmissions(prev => [...all, ...prev]);
+    alert(`Seeded ${all.length} submissions over ${days} days.`);
+  }
+  // SEED INFO END -----------------------------------------------------  
 
 
   // Working state (per tasklist)
@@ -1025,6 +1152,14 @@ function AppInner() {
       },
     });
   }
+
+  // before the return, right after hooks:
+  useEffect(() => {
+    // attach a callable onto settings snapshot for Admin Data pane
+    settings.__seedDemo = () =>
+      seedDemoSubmissions({ days: 45, perDay: [0, 4], employees: ["Employee A", "Employee B", "Employee C", ...settings.users.map(u => u.email || u.id)] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings, tasklistsToday]);
 
   return (
     <MantineProvider theme={baseTheme} forceColorScheme={scheme}>
@@ -1114,6 +1249,7 @@ function AppInner() {
                 />
               </div>
             )}
+
           </Container>
         </AppShell.Main>
 
