@@ -23,7 +23,14 @@ import {
   Switch,
   SegmentedControl,
   rem,
+  Tabs,
+  
 } from "@mantine/core";
+
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+} from "recharts";
+
 import { useLocalStorage } from "@mantine/hooks";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
 import { SettingsProvider, useSettings } from "./settings-store.jsx";
@@ -34,6 +41,7 @@ const TIME_BLOCKS = [
   { id: "mid", name: "Mid-Shift", start: "11:00", end: "16:00" },
   { id: "close", name: "Close", start: "20:00", end: "23:59" },
 ];
+
 const MOCK_TASKLISTS = [
   {
     id: "tl_001",
@@ -304,7 +312,7 @@ function EmployeeView({
                           </Badge>
                           <div>
                             <Text fw={600} c={isComplete ? "green.9" : undefined}>{task.title}</Text>
-                            <Text c={isComplete ? "green.9" : "dimmed" } fz="sm">
+                            <Text c={isComplete ? "green.9" : "dimmed"} fz="sm">
                               {task.category} • {task.inputType}
                               {task.photoRequired ? " • Photo required" : ""}
                               {task.noteRequired ? " • Note required" : ""}
@@ -317,8 +325,8 @@ function EmployeeView({
                                   state.reviewStatus === "Approved"
                                     ? "green"
                                     : state.reviewStatus === "Rework"
-                                    ? "yellow"
-                                    : "gray"
+                                      ? "yellow"
+                                      : "gray"
                                 }
                               >
                                 {state.reviewStatus}
@@ -550,9 +558,91 @@ function EmployeeReworkCard({ s, setSubmissions, setWorking, getTaskMeta }) {
 }
 
 /** ---------------------- Manager View ---------------------- */
-function ManagerView({ submissions, setSubmissions, setWorking, getTaskMeta }) {
-  const [selection, setSelection] = useState({});
+function ManagerView({
+  submissions,
+  setSubmissions,
+  setWorking,
+  getTaskMeta,
+  settings,
+}) {
+  // ---------- Filters ----------
+  const [filters, setFilters] = useState({
+    from: "",
+    to: "",
+    locationId: "",
+    employee: "",
+    category: "",
+    status: "", // Pending | Approved | Rework
+  });
 
+  const locationOptions = [{ value: "", label: "All locations" }].concat(
+    settings.locations.map((l) => ({ value: l.id, label: l.name }))
+  );
+  const employeeOptions = [{ value: "", label: "All employees" }].concat(
+    Array.from(
+      new Set(submissions.map((s) => s.submittedBy || s.signedBy || "Unknown"))
+    ).map((e) => ({ value: e, label: e }))
+  );
+  const categoryOptions = [{ value: "", label: "All categories" }].concat(
+    Array.from(
+      new Set(
+        submissions.flatMap((s) =>
+          s.tasks.map((t) => (getTaskMeta(s.tasklistId, t.taskId)?.category || "").trim())
+        )
+      )
+    )
+      .filter(Boolean)
+      .map((c) => ({ value: c, label: c }))
+  );
+
+  function matchesFilters(s) {
+    if (filters.locationId && s.locationId !== filters.locationId) return false;
+    if (filters.employee) {
+      const who = s.submittedBy || s.signedBy || "Unknown";
+      if (who !== filters.employee) return false;
+    }
+    if (filters.status && s.status !== filters.status) return false;
+    if (filters.from && s.date < filters.from) return false;
+    if (filters.to && s.date > filters.to) return false;
+    if (filters.category) {
+      const any = s.tasks.some(
+        (t) => (getTaskMeta(s.tasklistId, t.taskId)?.category || "").trim() === filters.category
+      );
+      if (!any) return false;
+    }
+    return true;
+  }
+
+  const filtered = submissions.filter(matchesFilters);
+
+  // ---------- Metrics ----------
+  const totals = filtered.reduce(
+    (acc, s) => {
+      for (const t of s.tasks) {
+        const done = t.na || t.status === "Complete";
+        if (done) acc.totalTasksCompleted += 1;
+        if (t.reviewStatus === "Rework") acc.totalRework += 1;
+      }
+      return acc;
+    },
+    { totalTasksCompleted: 0, totalRework: 0 }
+  );
+
+  const byEmployeeMap = new Map();
+  for (const s of filtered) {
+    const emp = s.submittedBy || s.signedBy || "Unknown";
+    if (!byEmployeeMap.has(emp)) byEmployeeMap.set(emp, { employee: emp, completed: 0 });
+    const row = byEmployeeMap.get(emp);
+    for (const t of s.tasks) {
+      if (t.na || t.status === "Complete") row.completed += 1;
+    }
+  }
+  const byEmployee = Array.from(byEmployeeMap.values()).sort(
+    (a, b) => b.completed - a.completed
+  );
+
+  // ---------- Approvals (existing behavior) ----------
+  const [selection, setSelection] = useState({});
   function toggle(subId, taskId) {
     setSelection((prev) => {
       const cur = new Set(prev[subId] || []);
@@ -560,13 +650,14 @@ function ManagerView({ submissions, setSubmissions, setWorking, getTaskMeta }) {
       return { ...prev, [subId]: cur };
     });
   }
-
   function applyReview(subId, review) {
     setSubmissions((prev) =>
       prev.map((s) => {
         if (s.id !== subId) return s;
         const sel = selection[subId] || new Set();
-        const tasks = s.tasks.map((t) => (sel.has(t.taskId) ? { ...t, reviewStatus: review } : t));
+        const tasks = s.tasks.map((t) =>
+          sel.has(t.taskId) ? { ...t, reviewStatus: review } : t
+        );
         const hasRework = tasks.some((t) => t.reviewStatus === "Rework");
         const allApproved = tasks.length > 0 && tasks.every((t) => t.reviewStatus === "Approved");
         const status = hasRework ? "Rework" : allApproved ? "Approved" : "Pending";
@@ -591,82 +682,199 @@ function ManagerView({ submissions, setSubmissions, setWorking, getTaskMeta }) {
 
   return (
     <Stack gap="md">
-      <Text fw={700} fz="lg">Manager Review</Text>
-      {submissions.length === 0 ? <Text c="dimmed" fz="sm">No submissions yet.</Text> : null}
+      <Tabs defaultValue="approve" keepMounted={false}>
+        <Tabs.List>
+          <Tabs.Tab value="approve">Approve</Tabs.Tab>
+          <Tabs.Tab value="dashboard">Dashboard</Tabs.Tab>
+        </Tabs.List>
 
-      {submissions.map((s) => (
-        <Card key={s.id} withBorder radius="lg" shadow="sm">
-          <Group justify="space-between">
-            <div>
-              <Text fw={600}>{s.tasklistName}</Text>
-              <Text c="dimmed" fz="sm">{s.date} • Signed: {s.signedBy}</Text>
-            </div>
-            <Badge variant="light" color={s.status === "Approved" ? "green" : s.status === "Rework" ? "yellow" : "gray"}>{s.status}</Badge>
-          </Group>
+        <Tabs.Panel value="approve" pt="md">
+          <Card withBorder radius="md" mb="sm">
+            <Grid>
+              <Grid.Col span={{ base: 12, md: 3 }}>
+                <TextInput
+                  label="From"
+                  type="date"
+                  value={filters.from}
+                  onChange={(e) => setFilters({ ...filters, from: e.target.value })}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, md: 3 }}>
+                <TextInput
+                  label="To"
+                  type="date"
+                  value={filters.to}
+                  onChange={(e) => setFilters({ ...filters, to: e.target.value })}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, md: 3 }}>
+                <Select
+                  label="Location"
+                  data={locationOptions}
+                  value={filters.locationId}
+                  onChange={(v) => setFilters({ ...filters, locationId: v || "" })}
+                  comboboxProps={{ withinPortal: true }}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, md: 3 }}>
+                <Select
+                  label="Employee"
+                  data={employeeOptions}
+                  value={filters.employee}
+                  onChange={(v) => setFilters({ ...filters, employee: v || "" })}
+                  searchable
+                  comboboxProps={{ withinPortal: true }}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, md: 3 }}>
+                <Select
+                  label="Category"
+                  data={categoryOptions}
+                  value={filters.category}
+                  onChange={(v) => setFilters({ ...filters, category: v || "" })}
+                  searchable
+                  comboboxProps={{ withinPortal: true }}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, md: 3 }}>
+                <Select
+                  label="Status"
+                  data={[
+                    { value: "", label: "All" },
+                    { value: "Pending", label: "Pending" },
+                    { value: "Approved", label: "Approved" },
+                    { value: "Rework", label: "Rework" },
+                  ]}
+                  value={filters.status}
+                  onChange={(v) => setFilters({ ...filters, status: v || "" })}
+                  comboboxProps={{ withinPortal: true }}
+                />
+              </Grid.Col>
+            </Grid>
+          </Card>
 
-          <ScrollArea mt="sm">
-            <Table highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>
-                    <input
-                      type="checkbox"
-                      checked={(selection[s.id]?.size || 0) === s.tasks.length}
-                      onChange={(e) => {
-                        const all = new Set(e.currentTarget.checked ? s.tasks.map((t) => t.taskId) : []);
-                        setSelection((prev) => ({ ...prev, [s.id]: all }));
-                      }}
-                    />
-                  </Table.Th>
-                  <Table.Th>Task</Table.Th>
-                  <Table.Th className="hide-sm">Value</Table.Th>
-                  <Table.Th className="hide-sm">Note</Table.Th>
-                  <Table.Th className="hide-sm">Photos</Table.Th>
-                  <Table.Th>Emp Status</Table.Th>
-                  <Table.Th>Review</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {s.tasks.map((t, i) => {
-                  const meta = getTaskMeta(s.tasklistId, t.taskId);
-                  return (
-                    <Table.Tr key={i}>
-                      <Table.Td>
-                        <input type="checkbox" checked={selection[s.id]?.has(t.taskId) || false} onChange={() => toggle(s.id, t.taskId)} />
-                      </Table.Td>
-                      <Table.Td><Text fw={600}>{meta.title}</Text></Table.Td>
-                      <Table.Td className="hide-sm">{t.value ?? "-"}</Table.Td>
-                      <Table.Td className="hide-sm">{t.note || "-"}</Table.Td>
-                      <Table.Td className="hide-sm">
-                        {(t.photos || []).length ? (
-                          <Group gap="xs" wrap="wrap">
-                            {(t.photos || []).map((p, j) => (
-                              <Badge key={j} variant="light" leftSection={<IconPhoto size={14} />}>{p}</Badge>
-                            ))}
-                          </Group>
-                        ) : "-"}
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge variant="outline" color={t.status === "Complete" ? "green" : "gray"}>{t.na ? "N/A" : t.status}</Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge variant="outline" color={t.reviewStatus === "Approved" ? "green" : t.reviewStatus === "Rework" ? "yellow" : "gray"}>
-                          {t.reviewStatus}
-                        </Badge>
-                      </Table.Td>
+          {filtered.length === 0 ? (
+            <Text c="dimmed" fz="sm">No submissions match your filters.</Text>
+          ) : null}
+
+          {filtered.map((s) => (
+            <Card key={s.id} withBorder radius="lg" shadow="sm" mb="sm">
+              <Group justify="space-between">
+                <div>
+                  <Text fw={600}>{s.tasklistName}</Text>
+                  <Text c="dimmed" fz="sm">
+                    {s.date} • {settings.locations.find((l) => l.id === s.locationId)?.name || s.locationId} • By: {s.submittedBy || s.signedBy}
+                  </Text>
+                </div>
+                <Badge variant="light" color={s.status === "Approved" ? "green" : s.status === "Rework" ? "yellow" : "gray"}>
+                  {s.status}
+                </Badge>
+              </Group>
+
+              <ScrollArea mt="sm">
+                <Table highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>
+                        <input
+                          type="checkbox"
+                          checked={(selection[s.id]?.size || 0) === s.tasks.length}
+                          onChange={(e) => {
+                            const all = new Set(e.currentTarget.checked ? s.tasks.map((t) => t.taskId) : []);
+                            setSelection((prev) => ({ ...prev, [s.id]: all }));
+                          }}
+                        />
+                      </Table.Th>
+                      <Table.Th>Task</Table.Th>
+                      <Table.Th className="hide-sm">Value</Table.Th>
+                      <Table.Th className="hide-sm">Note</Table.Th>
+                      <Table.Th className="hide-sm">Photos</Table.Th>
+                      <Table.Th>Emp Status</Table.Th>
+                      <Table.Th>Review</Table.Th>
                     </Table.Tr>
-                  );
-                })}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {s.tasks.map((t, i) => {
+                      const meta = getTaskMeta(s.tasklistId, t.taskId);
+                      return (
+                        <Table.Tr key={i}>
+                          <Table.Td>
+                            <input
+                              type="checkbox"
+                              checked={selection[s.id]?.has(t.taskId) || false}
+                              onChange={() => toggle(s.id, t.taskId)}
+                            />
+                          </Table.Td>
+                          <Table.Td><Text fw={600}>{meta?.title || t.taskId}</Text></Table.Td>
+                          <Table.Td className="hide-sm">{t.value ?? "-"}</Table.Td>
+                          <Table.Td className="hide-sm">{t.note || "-"}</Table.Td>
+                          <Table.Td className="hide-sm">
+                            {(t.photos || []).length ? (
+                              <Group gap="xs" wrap="wrap">
+                                {(t.photos || []).map((p, j) => (
+                                  <Badge key={j} variant="light" leftSection={<IconPhoto size={14} />}>{p}</Badge>
+                                ))}
+                              </Group>
+                            ) : "-"}
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge variant="outline" color={t.status === "Complete" ? "green" : "gray"}>
+                              {t.na ? "N/A" : t.status}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge
+                              variant="outline"
+                              color={t.reviewStatus === "Approved" ? "green" : t.reviewStatus === "Rework" ? "yellow" : "gray"}
+                            >
+                              {t.reviewStatus}
+                            </Badge>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
 
-          <Group justify="flex-end" mt="sm">
-            <Button variant="default" onClick={() => applyReview(s.id, "Rework")}>Rework Selected</Button>
-            <Button onClick={() => applyReview(s.id, "Approved")}>Approve Selected</Button>
-          </Group>
-        </Card>
-      ))}
+              <Group justify="flex-end" mt="sm">
+                <Button variant="default" onClick={() => applyReview(s.id, "Rework")}>Rework Selected</Button>
+                <Button onClick={() => applyReview(s.id, "Approved")}>Approve Selected</Button>
+              </Group>
+            </Card>
+          ))}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="dashboard" pt="md">
+          <Grid>
+            <Grid.Col span={{ base: 12, md: 3 }}>
+              <Card withBorder radius="md">
+                <Text c="dimmed" fz="sm">Total tasks completed</Text>
+                <Text fw={700} fz="xl">{totals.totalTasksCompleted}</Text>
+              </Card>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, md: 3 }}>
+              <Card withBorder radius="md">
+                <Text c="dimmed" fz="sm">Total in rework queue</Text>
+                <Text fw={700} fz="xl">{totals.totalRework}</Text>
+              </Card>
+            </Grid.Col>
+          </Grid>
+
+          <Card withBorder radius="md" mt="md" p="md" style={{ height: 360 }}>
+            <Text fw={600} mb="xs">Tasks completed by employee</Text>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={byEmployee} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="employee" />
+                <YAxis allowDecimals={false} />
+                <Tooltip />
+                <Bar dataKey="completed" />
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        </Tabs.Panel>
+      </Tabs>
     </Stack>
   );
 }
@@ -688,6 +896,13 @@ const baseTheme = createTheme({
 
 function AppInner() {
   const { settings } = useSettings();
+  const [currentEmployee, setCurrentEmployee] = useState("Employee A");
+  const employeeOptions = [
+    "Employee A",
+    "Employee B",
+    "Employee C",
+    ...settings.users.map((u) => u.email || u.id),
+  ];
 
   useEffect(() => {
     document.documentElement.style.setProperty("--brand", settings.company.brandColor || "#0ea5e9");
@@ -796,6 +1011,7 @@ function AppInner() {
           date: todayISO(),
           status: "Pending",
           signedBy: `PIN-${pin}`,
+          submittedBy: currentEmployee, // NEW: who did it
           signedAt: new Date().toISOString(),
           tasks: payload,
         };
@@ -842,6 +1058,14 @@ function AppInner() {
                 ]}
               />
               <Select
+                value={currentEmployee}
+                onChange={setCurrentEmployee}
+                data={employeeOptions}
+                w={220}
+                placeholder="Select employee"
+              />
+
+              <Select
                 value={activeLocationId}
                 onChange={(v) => setActiveLocationId(v)}
                 data={settings.locations.map((l) => ({ value: l.id, label: l.name }))}
@@ -874,6 +1098,7 @@ function AppInner() {
                 setSubmissions={setSubmissions}
                 setWorking={setWorking}
                 getTaskMeta={getTaskMetaToday}
+                settings={settings}
               />
             )}
 
