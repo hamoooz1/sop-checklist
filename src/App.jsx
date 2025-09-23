@@ -24,8 +24,10 @@ import {
   SegmentedControl,
   rem,
   Tabs,
-  
+
 } from "@mantine/core";
+
+import { useMediaQuery } from "@mantine/hooks";
 
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -903,6 +905,7 @@ function AppInner() {
     "Employee C",
     ...settings.users.map((u) => u.email || u.id),
   ];
+  const isNarrow = useMediaQuery('(max-width: 720px)');
 
   useEffect(() => {
     document.documentElement.style.setProperty("--brand", settings.company.brandColor || "#0ea5e9");
@@ -1026,7 +1029,7 @@ function AppInner() {
   return (
     <MantineProvider theme={baseTheme} forceColorScheme={scheme}>
       <AppShell
-        header={{ height: 64 }}
+        header={{ height: isNarrow ? 120 : 64 }}   // NEW: allow extra height when wrapping
         padding="md"
         withBorder={false}
         styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)" } }}
