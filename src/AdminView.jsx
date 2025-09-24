@@ -1,50 +1,123 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Card, Stack, Group, Text, Button, TextInput, ColorInput, Select, MultiSelect,
   NumberInput, Switch, FileButton, Badge, Table, ScrollArea, Divider,
-  NavLink, Grid, Modal, ActionIcon, rem
+  NavLink, Grid, Modal, ActionIcon, rem,
 } from "@mantine/core";
 import { IconUpload, IconDeviceFloppy, IconTrash, IconPlus, IconSettings } from "@tabler/icons-react";
+import { supabase } from "./lib/supabase";
 import { useSettings } from "./settings-store.jsx";
+/* -------------------------------------------------------
+   Small helpers
+------------------------------------------------------- */
+const TZ_OPTS = ["America/Los_Angeles", "America/Vancouver", "America/New_York", "UTC"];
+const DOW_OPTS = ["0", "1", "2", "3", "4", "5", "6"].map(x => ({ value: x, label: x }));
 
-export default function AdminView({ tasklists, submissions }) {
-  const [view, setView] = useState("company");
-  const { settings, updateSettings } = useSettings();
-  const [draft, setDraft] = useState(settings);
+function toIntArray(values) {
+  if (!Array.isArray(values)) return [];
+  return values.map(v => Number(v)).filter(v => Number.isInteger(v));
+}
 
-  useEffect(() => {
-    setDraft(settings);
-  }, [settings]);
+/* -------------------------------------------------------
+   DATA HOOKS: Locations, Time blocks, Templates(+Tasks)
+------------------------------------------------------- */
 
-  const saveDraftToApp = () => {
-    updateSettings(draft);
-    alert("Settings saved");
+// LOCATIONS
+function useDbLocations() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const refresh = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("location")
+      .select("id,name,timezone")
+      .order("name", { ascending: true });
+    setLoading(false);
+    if (error) { console.error(error); setRows([]); return; }
+    setRows(data || []);
   };
+  useEffect(() => { refresh(); }, []);
+  return { rows, loading, refresh };
+}
+
+// TIME BLOCKS
+function useDbTimeBlocks() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const refresh = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("time_block")
+      .select("id,name,start_time,end_time")
+      .order("start_time", { ascending: true });
+    setLoading(false);
+    if (error) { console.error(error); setRows([]); return; }
+    setRows(data || []);
+  };
+  useEffect(() => { refresh(); }, []);
+  return { rows, loading, refresh };
+}
+
+// TEMPLATES (+ nested tasks)
+function useDbTemplates() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("tasklist_template")
+      .select(`
+        id, location_id, name, time_block_id, recurrence, requires_approval, signoff_method, active,
+        tasks:tasklist_task (
+          id, title, category, input_type, min, max, photo_required, note_required, allow_na, priority
+        )
+      `)
+      .order("name", { ascending: true });
+    setLoading(false);
+    if (error) { console.error(error); setRows([]); return; }
+    setRows((data || []).map(t => ({ ...t, tasks: t.tasks || [] })));
+  };
+
+  useEffect(() => { refresh(); }, []);
+  return { rows, loading, refresh };
+}
+
+/* -------------------------------------------------------
+   AdminView
+------------------------------------------------------- */
+export default function AdminView() {
+  const [view, setView] = useState("company");
+  const { settings, updateSettings } = useSettings(); // keep this for company/theme panes
+
+  // DB data
+  const loc = useDbLocations();
+  const tb = useDbTimeBlocks();
+  const tpl = useDbTemplates();
+
+  // Draft settings (only for Company/Branding/etc which remain client-side config)
+  const [draft, setDraft] = useState(settings);
+  useEffect(() => setDraft(settings), [settings]);
+  const saveDraftToApp = () => { updateSettings(draft); alert("Settings saved"); };
 
   return (
     <div
       style={{
         display: "grid",
         gridTemplateColumns: "minmax(240px, 280px) 1fr",
-        gap: "16px",
+        gap: 16,
         alignItems: "start",
         minHeight: "calc(100dvh - 64px - 16px)",
       }}
     >
-      <Card
-        withBorder
-        radius="md"
-        style={{ position: "sticky", height: "fit-content", zIndex: 1, top: 80 }}
-      >
+      <Card withBorder radius="md" style={{ position: "sticky", height: "fit-content", zIndex: 1, top: 80 }}>
         <Text fw={700} mb="xs">Admin Settings</Text>
         <Stack gap={2}>
           <NavLink active={view === "company"} label="Company" onClick={() => setView("company")} leftSection={<IconSettings size={16} />} />
           <NavLink active={view === "locations"} label="Locations" onClick={() => setView("locations")} />
           <NavLink active={view === "users"} label="Users & Roles" onClick={() => setView("users")} />
-          <NavLink active={view === "checklists"} label="Checklists & Templates" onClick={() => setView("checklists")} />
-          <NavLink active={view === "policies"} label="Evidence & Compliance" onClick={() => setView("policies")} />
-          <NavLink active={view === "notifications"} label="Notifications" onClick={() => setView("notifications")} />
-          <NavLink active={view === "security"} label="Security & PIN" onClick={() => setView("security")} />
+          <NavLink active={view === "timeblocks"} label="Time Blocks" onClick={() => setView("timeblocks")} />
+          <NavLink active={view === "templates"} label="Checklists & Templates" onClick={() => setView("templates")} />
           <NavLink active={view === "branding"} label="Branding & Theme" onClick={() => setView("branding")} />
           <NavLink active={view === "data"} label="Data & Export" onClick={() => setView("data")} />
         </Stack>
@@ -59,83 +132,30 @@ export default function AdminView({ tasklists, submissions }) {
       >
         <div style={{ minWidth: 0 }}>
           {view === "company" && <CompanyPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "locations" && <LocationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "users" && <UsersPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "policies" && <PoliciesPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "notifications" && <NotificationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "security" && <SecurityPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "branding" && <BrandingPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "checklists" && <ChecklistsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "data" && (
-            <DataPane
-              settings={draft}
-              submissions={submissions}
-              onImportSettings={(json) => setDraft(json)}
-              onSeedDemo={settings?.__seedDemo}
-            />
-          )}
-
+          {view === "users" && <UsersPaneDB />}
+          {view === "locations" && <LocationsPaneDB loc={loc} />}
+          {view === "timeblocks" && <TimeBlocksPaneDB tb={tb} />}
+          {view === "templates" && <TemplatesPaneDB tpl={tpl} loc={loc} tb={tb} />}
+          {view === "data" && <DataPaneSimple />}
         </div>
       </ScrollArea.Autosize>
     </div>
   );
 }
 
-/* ---------- PANES ---------- */
-
+/* -------------------------------------------------------
+   COMPANY / BRANDING (client settings as before)
+------------------------------------------------------- */
 function CompanyPane({ settings, setSettings, onSave }) {
-  const s = settings.company;
+  const s = settings.company || {};
   return (
     <Card withBorder radius="md">
       <Text fw={700} mb="sm">Company</Text>
       <Stack gap="sm">
-        <TextInput label="Company name" value={s.name} onChange={(e) => setSettings({ ...settings, company: { ...s, name: e.target.value } })} />
-        <ColorInput label="Brand color" value={s.brandColor} onChange={(v) => setSettings({ ...settings, company: { ...s, brandColor: v } })} />
-        <Select
-          label="Timezone"
-          value={s.timezone}
-          onChange={(v) => setSettings({ ...settings, company: { ...s, timezone: v } })}
-          data={["America/Los_Angeles", "America/Vancouver", "America/New_York", "UTC"]}
-          comboboxProps={{ withinPortal: true }}
-        />
-        <Group grow wrap="nowrap">
-          <Select
-            label="Week starts on"
-            value={s.weekStart}
-            onChange={(v) => setSettings({ ...settings, company: { ...s, weekStart: v } })}
-            data={["Mon", "Sun"]}
-            comboboxProps={{ withinPortal: true }}
-          />
-          <Select
-            label="Locale"
-            value={s.locale}
-            onChange={(v) => setSettings({ ...settings, company: { ...s, locale: v } })}
-            data={["en-US", "en-CA", "fr-CA"]}
-            comboboxProps={{ withinPortal: true }}
-          />
-        </Group>
-        <Group wrap="wrap">
-          <FileButton
-            onChange={async (file) => {
-              if (!file) return;
-              const dataUrl = await new Promise((res, rej) => {
-                const r = new FileReader();
-                r.onload = () => res(r.result);
-                r.onerror = rej;
-                r.readAsDataURL(file);
-              });
-              setSettings({ ...settings, company: { ...s, logo: dataUrl } });
-            }}
-            accept="image/*"
-          >
-            {(props) => (
-              <Button leftSection={<IconUpload size={16} />} variant="default" {...props}>
-                Upload logo
-              </Button>
-            )}
-          </FileButton>
-          {s.logo && <Badge variant="light">Logo selected</Badge>}
-        </Group>
+        <TextInput label="Company name" value={s.name || ""} onChange={(e) => setSettings({ ...settings, company: { ...s, name: e.target.value } })} />
+        <ColorInput label="Brand color" value={s.brandColor || "#0ea5e9"} onChange={(v) => setSettings({ ...settings, company: { ...s, brandColor: v } })} />
+        <Select label="Timezone" value={s.timezone || "UTC"} onChange={(v) => setSettings({ ...settings, company: { ...s, timezone: v } })} data={TZ_OPTS} comboboxProps={{ withinPortal: true }} />
         <Divider />
         <Group justify="flex-end">
           <Button leftSection={<IconDeviceFloppy size={16} />} onClick={onSave}>Save</Button>
@@ -145,23 +165,53 @@ function CompanyPane({ settings, setSettings, onSave }) {
   );
 }
 
-function LocationsPane({ settings, setSettings, onSave }) {
-  const [addOpen, setAddOpen] = useState(false);
-  const [draft, setDraft] = useState({ name: "", timezone: "America/Los_Angeles" });
+function BrandingPane({ settings, setSettings, onSave }) {
+  const t = settings.theme || {};
+  return (
+    <Card withBorder radius="md">
+      <Text fw={700} mb="sm">Branding & Theme</Text>
+      <Stack gap="sm">
+        <Select
+          label="Default color scheme"
+          value={t.defaultScheme || "auto"}
+          onChange={(v) => setSettings({ ...settings, theme: { ...t, defaultScheme: v } })}
+          data={[{ value: "auto", label: "Auto" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]}
+          comboboxProps={{ withinPortal: true }}
+        />
+        <ColorInput label="Accent color" value={t.accent || "#0ea5e9"} onChange={(v) => setSettings({ ...settings, theme: { ...t, accent: v } })} />
+        <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
+      </Stack>
+    </Card>
+  );
+}
 
-  const addLocation = () => {
+/* -------------------------------------------------------
+   DB-PANE: LOCATIONS
+------------------------------------------------------- */
+function LocationsPaneDB({ loc }) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [draft, setDraft] = useState({ name: "", timezone: "UTC" });
+
+  const createLocation = async () => {
     if (!draft.name.trim()) return;
-    const id = `loc_${Date.now()}`;
-    setSettings({
-      ...settings,
-      locations: [...settings.locations, { id, name: draft.name.trim(), timezone: draft.timezone, managers: [] }],
-    });
-    setAddOpen(false);
-    setDraft({ name: "", timezone: "America/Los_Angeles" });
+    const { error } = await supabase.from("location").insert({ name: draft.name.trim(), timezone: draft.timezone || "UTC" });
+    if (error) return alert(error.message);
+    setAddOpen(false); setDraft({ name: "", timezone: "UTC" });
+    loc.refresh();
   };
 
-  const removeLocation = (id) =>
-    setSettings({ ...settings, locations: settings.locations.filter((l) => l.id !== id) });
+  const updateLocation = async (id, patch) => {
+    const { error } = await supabase.from("location").update(patch).eq("id", id);
+    if (error) return alert(error.message);
+    loc.refresh();
+  };
+
+  const removeLocation = async (id) => {
+    if (!confirm("Delete this location? (Templates at this location will also be removed)")) return;
+    const { error } = await supabase.from("location").delete().eq("id", id);
+    if (error) return alert(error.message);
+    loc.refresh();
+  };
 
   return (
     <Card withBorder radius="md">
@@ -171,11 +221,7 @@ function LocationsPane({ settings, setSettings, onSave }) {
       </Group>
 
       <ScrollArea.Autosize mah={360} type="auto" scrollbarSize={8} styles={{ viewport: { overflowX: "hidden" } }}>
-        <Table
-          highlightOnHover
-          withColumnBorders={false}
-          style={{ tableLayout: "fixed", width: "100%" }}
-        >
+        <Table highlightOnHover withColumnBorders={false} style={{ tableLayout: "fixed", width: "100%" }}>
           <colgroup>
             <col style={{ width: "52%" }} />
             <col style={{ width: "38%" }} />
@@ -189,31 +235,23 @@ function LocationsPane({ settings, setSettings, onSave }) {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {settings.locations.map((l) => (
+            {(loc.rows || []).map((l) => (
               <Table.Tr key={l.id}>
                 <Table.Td>
                   <TextInput
-                    value={l.name}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        locations: settings.locations.map((x) => (x.id === l.id ? { ...x, name: e.target.value } : x)),
-                      })
-                    }
-                    w="100%"
-                    miw={rem(160)}
+                    defaultValue={l.name || ""}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      if (v !== (l.name || "")) updateLocation(l.id, { name: v });
+                    }}
                   />
+
                 </Table.Td>
                 <Table.Td>
                   <Select
-                    value={l.timezone}
-                    onChange={(v) =>
-                      setSettings({
-                        ...settings,
-                        locations: settings.locations.map((x) => (x.id === l.id ? { ...x, timezone: v } : x)),
-                      })
-                    }
-                    data={["America/Los_Angeles", "America/Vancouver", "America/New_York", "UTC"]}
+                    value={l.timezone || "UTC"}
+                    onChange={(v) => updateLocation(l.id, { timezone: v })}
+                    data={TZ_OPTS}
                     w="100%"
                     comboboxProps={{ withinPortal: true }}
                   />
@@ -231,48 +269,495 @@ function LocationsPane({ settings, setSettings, onSave }) {
         </Table>
       </ScrollArea.Autosize>
 
-      <Group justify="flex-end" mt="sm">
-        <Button leftSection={<IconDeviceFloppy size={16} />} onClick={onSave}>Save</Button>
-      </Group>
-
       <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add location" centered>
         <Stack>
           <TextInput label="Name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-          <Select
-            label="Timezone"
-            value={draft.timezone}
-            onChange={(v) => setDraft({ ...draft, timezone: v })}
-            data={["America/Los_Angeles", "America/Vancouver", "America/New_York", "UTC"]}
-            comboboxProps={{ withinPortal: true, zIndex: 11000 }}
-          />
-
-          <Group justify="flex-end">
-            <Button onClick={addLocation}>Add</Button>
-          </Group>
+          <Select label="Timezone" value={draft.timezone} onChange={(v) => setDraft({ ...draft, timezone: v })} data={TZ_OPTS} comboboxProps={{ withinPortal: true, zIndex: 11000 }} />
+          <Group justify="flex-end"><Button onClick={createLocation}>Add</Button></Group>
         </Stack>
       </Modal>
     </Card>
   );
 }
 
-function UsersPane({ settings, setSettings, onSave }) {
-  const [invite, setInvite] = useState({ email: "", role: "Employee", locations: [] });
+/* -------------------------------------------------------
+   DB-PANE: TIME BLOCKS
+------------------------------------------------------- */
+function TimeBlocksPaneDB({ tb }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState({ id: "", name: "", start_time: "09:00", end_time: "17:00" });
 
-  const addUser = () => {
-    if (!invite.email.trim()) return;
-    const id = `u_${Date.now()}`;
-    const user = { id, email: invite.email.trim(), role: invite.role, locations: invite.locations };
-    setSettings({ ...settings, users: [user, ...settings.users] });
-    setInvite({ email: "", role: "Employee", locations: [] });
+  const save = async () => {
+    if (!draft.id.trim() || !draft.name.trim()) return;
+    // upsert by id (text PK)
+    const { error } = await supabase.from("time_block").upsert({
+      id: draft.id.trim(),
+      name: draft.name.trim(),
+      start_time: draft.start_time,
+      end_time: draft.end_time,
+    });
+    if (error) return alert(error.message);
+    setOpen(false);
+    tb.refresh();
   };
 
-  const removeUser = (id) =>
-    setSettings({ ...settings, users: settings.users.filter((u) => u.id !== id) });
+  const remove = async (id) => {
+    if (!confirm("Delete this time block?")) return;
+    const { error } = await supabase.from("time_block").delete().eq("id", id);
+    if (error) return alert(error.message);
+    tb.refresh();
+  };
+
+  return (
+    <Card withBorder radius="md">
+      <Group justify="space-between" mb="sm">
+        <Text fw={700}>Time Blocks</Text>
+        <Button leftSection={<IconPlus size={16} />} onClick={() => { setDraft({ id: "", name: "", start_time: "09:00", end_time: "17:00" }); setOpen(true); }}>
+          New time block
+        </Button>
+      </Group>
+
+      <Table highlightOnHover>
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th>ID</Table.Th>
+            <Table.Th>Name</Table.Th>
+            <Table.Th>Start</Table.Th>
+            <Table.Th>End</Table.Th>
+            <Table.Th></Table.Th>
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {(tb.rows || []).map(b => (
+            <Table.Tr key={b.id}>
+              <Table.Td><Badge variant="light">{b.id}</Badge></Table.Td>
+              <Table.Td>{b.name}</Table.Td>
+              <Table.Td>{b.start_time}</Table.Td>
+              <Table.Td>{b.end_time}</Table.Td>
+              <Table.Td>
+                <Group justify="flex-end">
+                  <Button size="xs" variant="default" onClick={() => { setDraft(b); setOpen(true); }}>Edit</Button>
+                  <ActionIcon color="red" variant="subtle" onClick={() => remove(b.id)} title="Delete"><IconTrash size={16} /></ActionIcon>
+                </Group>
+              </Table.Td>
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
+
+      <Modal opened={open} onClose={() => setOpen(false)} title="Time block" centered>
+        <Stack>
+          <TextInput label="ID (e.g., open, mid, close)" value={draft.id} onChange={(e) => setDraft({ ...draft, id: e.target.value })} />
+          <TextInput label="Name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          <Group grow>
+            <TextInput label="Start (HH:MM)" value={draft.start_time} onChange={(e) => setDraft({ ...draft, start_time: e.target.value })} />
+            <TextInput label="End (HH:MM)" value={draft.end_time} onChange={(e) => setDraft({ ...draft, end_time: e.target.value })} />
+          </Group>
+          <Group justify="flex-end"><Button onClick={save}>Save</Button></Group>
+        </Stack>
+      </Modal>
+    </Card>
+  );
+}
+
+/* -------------------------------------------------------
+   DB-PANE: TEMPLATES (+TASKS)
+------------------------------------------------------- */
+function TemplatesPaneDB({ tpl, loc, tb }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(initTplDraft());
+  const locationOptions = (loc.rows || []).map(l => ({ value: l.id, label: l.name }));
+  const tbOptions = (tb.rows || []).map(b => ({ value: b.id, label: `${b.name} (${b.start_time}–${b.end_time})` }));
+
+  function initTplDraft() {
+    return {
+      id: null, // null => create
+      name: "",
+      location_id: loc.rows?.[0]?.id || null,
+      time_block_id: tb.rows?.[0]?.id || "open",
+      recurrence: [0, 1, 2, 3, 4, 5, 6],
+      requires_approval: true,
+      signoff_method: "PIN",
+      active: true,
+      tasks: []
+    };
+  }
+
+  const resetAndOpenCreate = () => { setDraft(initTplDraft()); setOpen(true); };
+  const openEdit = (row) => { setDraft({ ...row, recurrence: row.recurrence || [], tasks: row.tasks || [] }); setOpen(true); };
+
+  const saveTemplate = async () => {
+    if (!draft.name.trim() || !draft.location_id || !draft.time_block_id) return;
+
+    if (!draft.id) {
+      // CREATE template, then create tasks
+      const { data, error } = await supabase.from("tasklist_template").insert({
+        location_id: draft.location_id,
+        name: draft.name.trim(),
+        time_block_id: draft.time_block_id,
+        recurrence: draft.recurrence,
+        requires_approval: !!draft.requires_approval,
+        signoff_method: draft.signoff_method || "PIN",
+        active: !!draft.active
+      }).select("id").single();
+
+      if (error) return alert(error.message);
+      const newId = data.id;
+
+      // Insert tasks
+      if (draft.tasks.length) {
+        const rows = draft.tasks.map(t => ({
+          tasklist_id: newId,
+          title: t.title || "Task",
+          category: t.category || "",
+          input_type: t.input_type || "checkbox",
+          min: t.min ?? null,
+          max: t.max ?? null,
+          photo_required: !!t.photo_required,
+          note_required: !!t.note_required,
+          allow_na: t.allow_na !== false,
+          priority: typeof t.priority === "number" ? t.priority : 3,
+        }));
+        const { error: terr } = await supabase.from("tasklist_task").insert(rows);
+        if (terr) return alert(terr.message);
+      }
+
+    } else {
+      // UPDATE template
+      const { error } = await supabase.from("tasklist_template").update({
+        location_id: draft.location_id,
+        name: draft.name.trim(),
+        time_block_id: draft.time_block_id,
+        recurrence: draft.recurrence,
+        requires_approval: !!draft.requires_approval,
+        signoff_method: draft.signoff_method || "PIN",
+        active: !!draft.active
+      }).eq("id", draft.id);
+      if (error) return alert(error.message);
+
+      // Sync tasks: upsert by id; delete removed
+      const existingIds = new Set((draft.tasks || []).filter(t => t.id).map(t => t.id));
+
+      // Delete tasks that no longer exist
+      const server = tpl.rows.find(t => t.id === draft.id) || { tasks: [] };
+      const toDelete = (server.tasks || []).filter(st => !existingIds.has(st.id));
+      if (toDelete.length) {
+        const { error: delErr } = await supabase.from("tasklist_task")
+          .delete()
+          .in("id", toDelete.map(x => x.id));
+        if (delErr) return alert(delErr.message);
+      }
+
+      // Upsert tasks (insert new, update existing)
+      for (const t of draft.tasks) {
+        if (t.id) {
+          const { error: uErr } = await supabase.from("tasklist_task").update({
+            title: t.title || "Task",
+            category: t.category || "",
+            input_type: t.input_type || "checkbox",
+            min: t.min ?? null,
+            max: t.max ?? null,
+            photo_required: !!t.photo_required,
+            note_required: !!t.note_required,
+            allow_na: t.allow_na !== false,
+            priority: typeof t.priority === "number" ? t.priority : 3,
+          }).eq("id", t.id);
+          if (uErr) return alert(uErr.message);
+        } else {
+          const { error: iErr } = await supabase.from("tasklist_task").insert({
+            tasklist_id: draft.id,
+            title: t.title || "Task",
+            category: t.category || "",
+            input_type: t.input_type || "checkbox",
+            min: t.min ?? null,
+            max: t.max ?? null,
+            photo_required: !!t.photo_required,
+            note_required: !!t.note_required,
+            allow_na: t.allow_na !== false,
+            priority: typeof t.priority === "number" ? t.priority : 3,
+          });
+          if (iErr) return alert(iErr.message);
+        }
+      }
+    }
+
+    setOpen(false);
+    await tpl.refresh();
+  };
+
+  const deleteTemplate = async (id) => {
+    if (!confirm("Delete this template (and its tasks)?")) return;
+    const { error } = await supabase.from("tasklist_template").delete().eq("id", id);
+    if (error) return alert(error.message);
+    tpl.refresh();
+  };
+
+  // Task editor handlers (shape uses DB field names)
+  const addTaskToDraft = () => {
+    setDraft(prev => ({
+      ...prev,
+      tasks: [...(prev.tasks || []), {
+        id: null, title: "", category: "", input_type: "checkbox",
+        min: null, max: null, photo_required: false, note_required: false,
+        allow_na: true, priority: 3
+      }]
+    }));
+  };
+  const updateTaskInDraft = (idx, patch) => {
+    setDraft(prev => {
+      const copy = [...(prev.tasks || [])];
+      copy[idx] = { ...copy[idx], ...patch };
+      return { ...prev, tasks: copy };
+    });
+  };
+  const removeTaskInDraft = (idx) => {
+    setDraft(prev => {
+      const copy = [...(prev.tasks || [])];
+      copy.splice(idx, 1);
+      return { ...prev, tasks: copy };
+    });
+  };
+
+  return (
+    <Card withBorder radius="md">
+      <Group justify="space-between" mb="sm">
+        <Text fw={700}>Checklists & Templates</Text>
+        <Button leftSection={<IconPlus size={16} />} onClick={resetAndOpenCreate}>New template</Button>
+      </Group>
+
+      <Table highlightOnHover>
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th>Name</Table.Th>
+            <Table.Th>Location</Table.Th>
+            <Table.Th>Time block</Table.Th>
+            <Table.Th>Days</Table.Th>
+            <Table.Th>Tasks</Table.Th>
+            <Table.Th>Status</Table.Th>
+            <Table.Th></Table.Th>
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {(tpl.rows || []).map(t => {
+            const tbRow = (tb.rows || []).find(x => x.id === t.time_block_id);
+            const locRow = (loc.rows || []).find(x => x.id === t.location_id);
+            return (
+              <Table.Tr key={t.id}>
+                <Table.Td><Text fw={600}>{t.name}</Text></Table.Td>
+                <Table.Td>{locRow?.name || t.location_id}</Table.Td>
+                <Table.Td>{tbRow ? `${tbRow.name} (${tbRow.start_time}–${tbRow.end_time})` : t.time_block_id}</Table.Td>
+                <Table.Td>{(t.recurrence || []).join(",")}</Table.Td>
+                <Table.Td>{t.tasks?.length || 0}</Table.Td>
+                <Table.Td>
+                  <Badge variant="light" color={t.active ? "green" : "gray"}>{t.active ? "Active" : "Inactive"}</Badge>
+                </Table.Td>
+                <Table.Td>
+                  <Group justify="flex-end" gap="xs">
+                    <Button size="xs" variant="default" onClick={() => openEdit(t)}>Edit</Button>
+                    <ActionIcon color="red" variant="subtle" onClick={() => deleteTemplate(t.id)} title="Delete"><IconTrash size={16} /></ActionIcon>
+                  </Group>
+                </Table.Td>
+              </Table.Tr>
+            );
+          })}
+        </Table.Tbody>
+      </Table>
+
+      <Modal opened={open} onClose={() => setOpen(false)} title="Template" centered size="lg">
+        <Stack gap="sm">
+          <TextInput label="Template name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          <Group grow wrap="nowrap">
+            <Select label="Location" value={draft.location_id} onChange={(v) => setDraft({ ...draft, location_id: v })} data={locationOptions} comboboxProps={{ withinPortal: true, zIndex: 11000 }} />
+            <Select label="Time block" value={draft.time_block_id} onChange={(v) => setDraft({ ...draft, time_block_id: v })} data={tbOptions} comboboxProps={{ withinPortal: true, zIndex: 11000 }} />
+          </Group>
+          <MultiSelect
+            label="Days of week (0=Sun...6=Sat)"
+            data={DOW_OPTS}
+            value={(draft.recurrence || []).map(String)}
+            onChange={(arr) => setDraft({ ...draft, recurrence: toIntArray(arr) })}
+            searchable
+            comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+          />
+          <Group>
+            <Switch label="Requires approval" checked={!!draft.requires_approval} onChange={(e) => setDraft({ ...draft, requires_approval: e.currentTarget.checked })} />
+            <Switch label="Active" checked={!!draft.active} onChange={(e) => setDraft({ ...draft, active: e.currentTarget.checked })} />
+            <Select label="Signoff method" value={draft.signoff_method} onChange={(v) => setDraft({ ...draft, signoff_method: v })} data={["PIN"]} />
+          </Group>
+
+          {/* Task editor (DB field names) */}
+          <Card withBorder radius="md">
+            <Group justify="space-between" mb="xs"><Text fw={600}>Tasks</Text><Button size="xs" onClick={addTaskToDraft}>Add task</Button></Group>
+            <Table highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Title</Table.Th>
+                  <Table.Th className="hide-sm">Category</Table.Th>
+                  <Table.Th>Type</Table.Th>
+                  <Table.Th className="hide-sm">Range</Table.Th>
+                  <Table.Th className="hide-sm">Rules</Table.Th>
+                  <Table.Th>Priority</Table.Th>
+                  <Table.Th></Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {(draft.tasks || []).map((t, i) => (
+                  <Table.Tr key={i}>
+                    <Table.Td><TextInput value={t.title} onChange={(e) => updateTaskInDraft(i, { title: e.target.value })} /></Table.Td>
+                    <Table.Td className="hide-sm"><TextInput value={t.category || ""} onChange={(e) => updateTaskInDraft(i, { category: e.target.value })} /></Table.Td>
+                    <Table.Td>
+                      <Select
+                        value={t.input_type || "checkbox"}
+                        onChange={(v) => updateTaskInDraft(i, { input_type: v })}
+                        data={["checkbox", "number"].map(x => ({ value: x, label: x }))}
+                        comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+                      />
+                    </Table.Td>
+                    <Table.Td className="hide-sm">
+                      <Group gap="xs" wrap="nowrap">
+                        <NumberInput placeholder="min" value={t.min ?? ""} onChange={(v) => updateTaskInDraft(i, { min: v === "" ? null : Number(v) })} style={{ width: rem(90) }} />
+                        <NumberInput placeholder="max" value={t.max ?? ""} onChange={(v) => updateTaskInDraft(i, { max: v === "" ? null : Number(v) })} style={{ width: rem(90) }} />
+                      </Group>
+                    </Table.Td>
+                    <Table.Td className="hide-sm">
+                      <Group gap="xs">
+                        <Switch label="Photo" checked={!!t.photo_required} onChange={(e) => updateTaskInDraft(i, { photo_required: e.currentTarget.checked })} />
+                        <Switch label="Note" checked={!!t.note_required} onChange={(e) => updateTaskInDraft(i, { note_required: e.currentTarget.checked })} />
+                        <Switch label="N/A" checked={t.allow_na !== false} onChange={(e) => updateTaskInDraft(i, { allow_na: e.currentTarget.checked })} />
+                      </Group>
+                    </Table.Td>
+                    <Table.Td>
+                      <NumberInput min={1} max={5} value={t.priority ?? 3} onChange={(v) => updateTaskInDraft(i, { priority: Number(v) || 3 })} style={{ width: rem(80) }} />
+                    </Table.Td>
+                    <Table.Td>
+                      <ActionIcon color="red" variant="subtle" onClick={() => removeTaskInDraft(i)} title="Remove"><IconTrash size={16} /></ActionIcon>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Card>
+
+          <Group justify="flex-end"><Button onClick={saveTemplate}>Save template</Button></Group>
+        </Stack>
+      </Modal>
+    </Card>
+  );
+}
+
+/* -------------------------------------------------------
+   Data Pane (simple export of DB rows, handy for QA)
+------------------------------------------------------- */
+
+function UsersPaneDB() {
+  const [rows, setRows] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const [invite, setInvite] = useState({ email: "", role: "Employee", locations: [] });
+  const [pinModal, setPinModal] = useState({ open: false, userId: null, email: "", pin: "" });
+
+  async function refresh() {
+    setLoading(true);
+    const [u, l, ul] = await Promise.all([
+      supabase.from("user_profile").select("*").order("created_at", { ascending: false }),
+      supabase.from("location").select("id,name").order("name", { ascending: true }),
+      supabase.from("user_location").select("*"),
+    ]);
+    setLoading(false);
+
+    if (u.error || l.error || ul.error) {
+      if (u.error)  console.error(u.error);
+      if (l.error)  console.error(l.error);
+      if (ul.error) console.error(ul.error);
+      setRows([]); setLocations([]);
+      return;
+    }
+
+    const locMap = new Map((l.data || []).map(x => [x.id, x.name]));
+    const byUser = new Map();
+    for (const r of (ul.data || [])) {
+      if (!byUser.has(r.user_id)) byUser.set(r.user_id, []);
+      byUser.get(r.user_id).push(r.location_id);
+    }
+
+    const joined = (u.data || []).map(x => ({
+      ...x,
+      locations: byUser.get(x.id) || [],
+    }));
+
+    setRows(joined);
+    setLocations(l.data || []);
+  }
+
+  useEffect(() => { refresh(); }, []);
+
+  async function addUser() {
+    if (!invite.email.trim()) return;
+    const { data, error } = await supabase
+      .from("user_profile")
+      .insert({ email: invite.email.trim(), role: invite.role })
+      .select("id")
+      .single();
+    if (error) return alert(error.message);
+
+    if ((invite.locations || []).length) {
+      const pairs = invite.locations.map(lid => ({ user_id: data.id, location_id: lid }));
+      const { error: e2 } = await supabase.from("user_location").insert(pairs);
+      if (e2) return alert(e2.message);
+    }
+
+    setInvite({ email: "", role: "Employee", locations: [] });
+    refresh();
+  }
+
+  async function updateRole(userId, role) {
+    const { error } = await supabase.from("user_profile").update({ role }).eq("id", userId);
+    if (error) return alert(error.message);
+    refresh();
+  }
+
+  async function updateLocations(userId, locList) {
+    // replace all assignments (simple approach)
+    const { error: delErr } = await supabase.from("user_location").delete().eq("user_id", userId);
+    if (delErr) return alert(delErr.message);
+    if (locList.length) {
+      const rows = locList.map(lid => ({ user_id: userId, location_id: lid }));
+      const { error: insErr } = await supabase.from("user_location").insert(rows);
+      if (insErr) return alert(insErr.message);
+    }
+    refresh();
+  }
+
+  async function deleteUser(userId) {
+    if (!confirm("Remove this user?")) return;
+    const { error } = await supabase.from("user_profile").delete().eq("id", userId);
+    if (error) return alert(error.message);
+    refresh();
+  }
+
+  async function savePin() {
+    try {
+      if (!pinModal.userId || !pinModal.pin) return;
+      const { error } = await supabase.rpc("set_user_pin", {
+        p_user_id: pinModal.userId,
+        p_pin: pinModal.pin,
+      });
+      if (error) throw error;
+      setPinModal({ open: false, userId: null, email: "", pin: "" });
+      refresh();
+      alert("PIN updated.");
+    } catch (e) {
+      alert(e.message);
+    }
+  }
+
+  const locOptions = locations.map(l => ({ value: l.id, label: l.name }));
 
   return (
     <Card withBorder radius="md">
       <Text fw={700} mb="sm">Users & Roles</Text>
-      <Stack gap="sm">
+
+      <Stack gap="sm" mb="md">
         <Group grow wrap="wrap">
           <TextInput
             label="Email"
@@ -284,36 +769,31 @@ function UsersPane({ settings, setSettings, onSave }) {
             label="Role"
             value={invite.role}
             onChange={(v) => setInvite({ ...invite, role: v })}
-            data={["Admin", "Manager", "Employee"]}
+            data={["Admin","Manager","Employee"]}
             comboboxProps={{ withinPortal: true }}
           />
         </Group>
         <MultiSelect
           label="Assign to locations"
           placeholder="Pick one or more"
-          data={settings.locations.map((l) => ({ value: l.id, label: l.name }))}
+          data={locOptions}
           value={invite.locations}
-          onChange={(values) => setInvite({ ...invite, locations: values })}
+          onChange={(vals) => setInvite({ ...invite, locations: vals })}
           searchable
           comboboxProps={{ withinPortal: true }}
         />
         <Group justify="flex-end">
-          <Button leftSection={<IconPlus size={16} />} onClick={addUser}>Invite</Button>
+          <Button leftSection={<IconPlus size={16} />} onClick={addUser} disabled={loading}>Add user</Button>
         </Group>
       </Stack>
 
-      <Divider my="md" />
-
-      <ScrollArea.Autosize mah={360} type="auto" scrollbarSize={8} styles={{ viewport: { overflowX: "hidden" } }}>
-        <Table
-          highlightOnHover
-          style={{ tableLayout: "fixed", width: "100%" }}
-        >
+      <ScrollArea.Autosize mah={420} type="auto" scrollbarSize={8} styles={{ viewport: { overflowX: "hidden" } }}>
+        <Table highlightOnHover style={{ tableLayout: "fixed", width: "100%" }}>
           <colgroup>
+            <col style={{ width: "30%" }} />
+            <col style={{ width: "14%" }} />
             <col style={{ width: "36%" }} />
-            <col style={{ width: "18%" }} />
-            <col style={{ width: "36%" }} />
-            <col style={{ width: "10%" }} />
+            <col style={{ width: "20%" }} />
           </colgroup>
           <Table.Thead>
             <Table.Tr>
@@ -324,41 +804,34 @@ function UsersPane({ settings, setSettings, onSave }) {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {settings.users.map((u) => (
+            {rows.map((u) => (
               <Table.Tr key={u.id}>
                 <Table.Td style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{u.email}</Table.Td>
                 <Table.Td>
                   <Select
                     value={u.role}
-                    onChange={(v) =>
-                      setSettings({
-                        ...settings,
-                        users: settings.users.map((x) => (x.id === u.id ? { ...x, role: v } : x)),
-                      })
-                    }
-                    data={["Admin", "Manager", "Employee"]}
+                    onChange={(v) => updateRole(u.id, v)}
+                    data={["Admin","Manager","Employee"]}
                     w="100%"
                     comboboxProps={{ withinPortal: true }}
                   />
                 </Table.Td>
                 <Table.Td>
                   <MultiSelect
-                    data={settings.locations.map((l) => ({ value: l.id, label: l.name }))}
+                    data={locOptions}
                     value={u.locations}
-                    onChange={(vals) =>
-                      setSettings({
-                        ...settings,
-                        users: settings.users.map((x) => (x.id === u.id ? { ...x, locations: vals } : x)),
-                      })
-                    }
+                    onChange={(vals) => updateLocations(u.id, vals)}
                     searchable
                     w="100%"
                     comboboxProps={{ withinPortal: true }}
                   />
                 </Table.Td>
                 <Table.Td>
-                  <Group justify="flex-end">
-                    <ActionIcon color="red" variant="subtle" onClick={() => removeUser(u.id)} title="Remove">
+                  <Group justify="flex-end" gap="xs">
+                    <Button size="xs" variant="default" onClick={() => setPinModal({ open: true, userId: u.id, email: u.email, pin: "" })}>
+                      Set PIN
+                    </Button>
+                    <ActionIcon color="red" variant="subtle" onClick={() => deleteUser(u.id)} title="Remove">
                       <IconTrash size={16} />
                     </ActionIcon>
                   </Group>
@@ -369,578 +842,40 @@ function UsersPane({ settings, setSettings, onSave }) {
         </Table>
       </ScrollArea.Autosize>
 
-      <Group justify="flex-end" mt="sm">
-        <Button leftSection={<IconDeviceFloppy size={16} />} onClick={onSave}>Save</Button>
-      </Group>
-    </Card>
-  );
-}
-
-function PoliciesPane({ settings, setSettings, onSave }) {
-  const p = settings.policies;
-  return (
-    <Card withBorder radius="md">
-      <Text fw={700} mb="sm">Evidence & Compliance</Text>
-      <Stack gap="sm">
-        <NumberInput
-          label="Photo retention (days)"
-          min={7}
-          max={3650}
-          value={p.photoRetentionDays}
-          onChange={(v) => setSettings({ ...settings, policies: { ...p, photoRetentionDays: Number(v) || 0 } })}
-        />
-        <Switch
-          label="Require note for Food Safety tasks"
-          checked={p.requireNoteForFoodSafety}
-          onChange={(e) => setSettings({ ...settings, policies: { ...p, requireNoteForFoodSafety: e.currentTarget.checked } })}
-        />
-        <Text fz="sm" c="dimmed">Category-based photo rules can be added later (global overrides per-task settings).</Text>
-        <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
-      </Stack>
-    </Card>
-  );
-}
-
-function NotificationsPane({ settings, setSettings, onSave }) {
-  const n = settings.notifications;
-  return (
-    <Card withBorder radius="md">
-      <Text fw={700} mb="sm">Notifications</Text>
-      <Stack>
-        <Switch label="Daily digest to managers" checked={n.dailyDigest}
-          onChange={(e) => setSettings({ ...settings, notifications: { ...n, dailyDigest: e.currentTarget.checked } })} />
-        <Switch label="Rework alerts" checked={n.reworkAlerts}
-          onChange={(e) => setSettings({ ...settings, notifications: { ...n, reworkAlerts: e.currentTarget.checked } })} />
-        <Switch label="Overdue checklist alerts" checked={n.overdueAlerts}
-          onChange={(e) => setSettings({ ...settings, notifications: { ...n, overdueAlerts: e.currentTarget.checked } })} />
-        <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
-      </Stack>
-    </Card>
-  );
-}
-
-function SecurityPane({ settings, setSettings, onSave }) {
-  const sec = settings.security;
-  return (
-    <Card withBorder radius="md">
-      <Text fw={700} mb="sm">Security & PIN</Text>
-      <Grid>
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <NumberInput label="PIN length" min={4} max={8} value={sec.pinLength}
-            onChange={(v) => setSettings({ ...settings, security: { ...sec, pinLength: Number(v) || 4 } })} />
-        </Grid.Col>
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <NumberInput label="PIN expiry (days)" min={0} max={3650} value={sec.pinExpiryDays}
-            onChange={(v) => setSettings({ ...settings, security: { ...sec, pinExpiryDays: Number(v) || 0 } })} />
-        </Grid.Col>
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <NumberInput label="Lockout after failed attempts" min={0} max={10} value={sec.lockoutThreshold}
-            onChange={(v) => setSettings({ ...settings, security: { ...sec, lockoutThreshold: Number(v) || 0 } })} />
-        </Grid.Col>
-      </Grid>
-      <Switch mt="sm" label="Two-person signoff (dual approval)" checked={sec.dualSignoff}
-        onChange={(e) => setSettings({ ...settings, security: { ...sec, dualSignoff: e.currentTarget.checked } })} />
-      <Group justify="flex-end" mt="md"><Button onClick={onSave}>Save</Button></Group>
-    </Card>
-  );
-}
-
-function BrandingPane({ settings, setSettings, onSave }) {
-  const t = settings.theme;
-  return (
-    <Card withBorder radius="md">
-      <Text fw={700} mb="sm">Branding & Theme</Text>
-      <Stack gap="sm">
-        <Select
-          label="Default color scheme"
-          value={t.defaultScheme}
-          onChange={(v) => setSettings({ ...settings, theme: { ...t, defaultScheme: v } })}
-          data={[
-            { value: "auto", label: "Auto" },
-            { value: "light", label: "Light" },
-            { value: "dark", label: "Dark" },
-          ]}
-          comboboxProps={{ withinPortal: true }}
-        />
-        <ColorInput label="Accent color" value={t.accent} onChange={(v) => setSettings({ ...settings, theme: { ...t, accent: v } })} />
-        <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
-      </Stack>
-    </Card>
-  );
-}
-
-function ChecklistsPane({ settings, setSettings, onSave }) {
-  const stores = settings.checklists || { timeBlocks: [], templates: [], overrides: [] };
-
-  // Local UI state
-  const [tab, setTab] = useState("templates"); // "templates" | "timeblocks" | "adhoc"
-  const [createTplOpen, setCreateTplOpen] = useState(false);
-  const [editTplOpen, setEditTplOpen] = useState(false);
-  const [tplDraft, setTplDraft] = useState(initTemplateDraft());
-  const [activeTplId, setActiveTplId] = useState(null);
-
-  const [tbOpen, setTbOpen] = useState(false);
-  const [tbDraft, setTbDraft] = useState(initTimeBlockDraft());
-
-  const [adhocOpen, setAdhocOpen] = useState(false);
-  const [adhocDraft, setAdhocDraft] = useState(initAdhocDraft(settings.locations?.[0]?.id));
-
-  function initTemplateDraft() {
-    return {
-      id: makeId("tpl"),
-      name: "",
-      locationId: settings.locations?.[0]?.id || "",
-      timeBlockId: stores.timeBlocks?.[0]?.id || "",
-      recurrence: [0, 1, 2, 3, 4, 5, 6],
-      tasks: []
-    };
-  }
-
-  function initTimeBlockDraft() {
-    return { id: "", name: "", start: "09:00", end: "17:00" };
-  }
-
-  function initAdhocDraft(defaultLocation) {
-    return {
-      id: makeId("ovr"),
-      date: new Date().toISOString().slice(0, 10),
-      locationId: defaultLocation || "",
-      timeBlockId: stores.timeBlocks?.[0]?.id || "",
-      tasks: []
-    };
-  }
-
-  function makeId(prefix) {
-    return `${prefix}_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`;
-  }
-
-  // Save helpers on settings
-  function upsertTemplate(tpl, mode) {
-    const exists = stores.templates.findIndex(t => t.id === tpl.id);
-    const next = { ...settings, checklists: { ...stores } };
-    if (exists >= 0 && mode !== "duplicate") {
-      next.checklists.templates = stores.templates.map(t => t.id === tpl.id ? tpl : t);
-    } else {
-      next.checklists.templates = [...stores.templates, { ...tpl, id: mode === "duplicate" ? makeId("tpl") : tpl.id }];
-    }
-    setSettings(next);
-  }
-
-  function removeTemplate(id) {
-    const next = { ...settings, checklists: { ...stores, templates: stores.templates.filter(t => t.id !== id) } };
-    setSettings(next);
-    if (activeTplId === id) setActiveTplId(null);
-  }
-
-  function upsertTimeBlock(tb) {
-    const exists = stores.timeBlocks.findIndex(t => t.id === tb.id);
-    const next = { ...settings, checklists: { ...stores } };
-    if (!tb.id.trim()) return;
-    if (exists >= 0) {
-      next.checklists.timeBlocks = stores.timeBlocks.map(t => t.id === tb.id ? tb : t);
-    } else {
-      next.checklists.timeBlocks = [...stores.timeBlocks, tb];
-    }
-    setSettings(next);
-  }
-
-  function removeTimeBlock(id) {
-    const next = { ...settings, checklists: { ...stores, timeBlocks: stores.timeBlocks.filter(t => t.id !== id) } };
-    setSettings(next);
-  }
-
-  function addTaskToDraftTemplate(taskDraft) {
-    setTplDraft(prev => ({ ...prev, tasks: [...prev.tasks, { ...taskDraft, id: makeId("tt") }] }));
-  }
-
-  function updateTaskInDraftTemplate(taskId, patch) {
-    setTplDraft(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, ...patch } : t) }));
-  }
-
-  function removeTaskFromDraftTemplate(taskId) {
-    setTplDraft(prev => ({ ...prev, tasks: prev.tasks.filter(t => t.id !== taskId) }));
-  }
-
-  function addTaskToAdhoc(taskDraft) {
-    setAdhocDraft(prev => ({ ...prev, tasks: [...prev.tasks, { ...taskDraft, id: makeId("adh") }] }));
-  }
-
-  function removeTaskFromAdhoc(taskId) {
-    setAdhocDraft(prev => ({ ...prev, tasks: prev.tasks.filter(t => t.id !== taskId) }));
-  }
-
-  function saveAdhocOverride() {
-    const exists = stores.overrides.findIndex(o => o.id === adhocDraft.id);
-    const next = { ...settings, checklists: { ...stores } };
-    if (exists >= 0) {
-      next.checklists.overrides = stores.overrides.map(o => o.id === adhocDraft.id ? adhocDraft : o);
-    } else {
-      next.checklists.overrides = [...stores.overrides, adhocDraft];
-    }
-    setSettings(next);
-    setAdhocOpen(false);
-    setAdhocDraft(initAdhocDraft(settings.locations?.[0]?.id));
-  }
-
-  const timeBlockOptions = stores.timeBlocks.map(tb => ({ value: tb.id, label: `${tb.name} (${tb.start}–${tb.end})` }));
-  const locationOptions = settings.locations.map(l => ({ value: l.id, label: l.name }));
-
-  return (
-    <Card withBorder radius="md">
-      <Group justify="space-between" mb="sm" wrap="nowrap">
-        <Text fw={700}>Checklists & Templates</Text>
-        <Group gap="xs">
-          <Button variant={tab === "timeblocks" ? "filled" : "default"} onClick={() => setTab("timeblocks")}>Time Blocks</Button>
-          <Button variant={tab === "templates" ? "filled" : "default"} onClick={() => setTab("templates")}>Templates</Button>
-          <Button variant={tab === "adhoc" ? "filled" : "default"} onClick={() => setTab("adhoc")}>Ad-hoc Tasks</Button>
-        </Group>
-      </Group>
-
-      {tab === "timeblocks" && (
-        <Stack gap="sm">
-          <Group>
-            <Button leftSection={<IconPlus size={16} />} onClick={() => { setTbDraft(initTimeBlockDraft()); setTbOpen(true); }}>
-              New time block
-            </Button>
-          </Group>
-
-          <Table highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>ID</Table.Th>
-                <Table.Th>Name</Table.Th>
-                <Table.Th>Start</Table.Th>
-                <Table.Th>End</Table.Th>
-                <Table.Th></Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {stores.timeBlocks.map(tb => (
-                <Table.Tr key={tb.id}>
-                  <Table.Td><Badge variant="light">{tb.id}</Badge></Table.Td>
-                  <Table.Td>{tb.name}</Table.Td>
-                  <Table.Td>{tb.start}</Table.Td>
-                  <Table.Td>{tb.end}</Table.Td>
-                  <Table.Td>
-                    <Group justify="flex-end">
-                      <Button size="xs" variant="default" onClick={() => { setTbDraft(tb); setTbOpen(true); }}>Edit</Button>
-                      <ActionIcon color="red" variant="subtle" onClick={() => removeTimeBlock(tb.id)} title="Delete"><IconTrash size={16} /></ActionIcon>
-                    </Group>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-
-          <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
-
-          <Modal opened={tbOpen} onClose={() => setTbOpen(false)} title="Time block" centered>
-            <Stack>
-              <TextInput label="ID (e.g., open, mid, close)" value={tbDraft.id} onChange={(e) => setTbDraft({ ...tbDraft, id: e.target.value })} />
-              <TextInput label="Name" value={tbDraft.name} onChange={(e) => setTbDraft({ ...tbDraft, name: e.target.value })} />
-              <Group grow>
-                <TextInput label="Start (HH:MM)" value={tbDraft.start} onChange={(e) => setTbDraft({ ...tbDraft, start: e.target.value })} />
-                <TextInput label="End (HH:MM)" value={tbDraft.end} onChange={(e) => setTbDraft({ ...tbDraft, end: e.target.value })} />
-              </Group>
-              <Group justify="flex-end">
-                <Button onClick={() => { upsertTimeBlock(tbDraft); setTbOpen(false); }}>Save</Button>
-              </Group>
-            </Stack>
-          </Modal>
-        </Stack>
-      )}
-
-      {tab === "templates" && (
-        <Stack gap="sm">
-          <Group>
-            <Button leftSection={<IconPlus size={16} />} onClick={() => { setTplDraft(initTemplateDraft()); setCreateTplOpen(true); }}>
-              New template
-            </Button>
-          </Group>
-
-          <Table highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Name</Table.Th>
-                <Table.Th>Location</Table.Th>
-                <Table.Th>Time block</Table.Th>
-                <Table.Th>Days</Table.Th>
-                <Table.Th>Tasks</Table.Th>
-                <Table.Th></Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {stores.templates.map(tpl => {
-                const tb = stores.timeBlocks.find(x => x.id === tpl.timeBlockId);
-                const loc = settings.locations.find(l => l.id === tpl.locationId);
-                return (
-                  <Table.Tr key={tpl.id}>
-                    <Table.Td><Text fw={600}>{tpl.name}</Text></Table.Td>
-                    <Table.Td>{loc?.name || "-"}</Table.Td>
-                    <Table.Td>{tb ? `${tb.name} (${tb.start}–${tb.end})` : tpl.timeBlockId}</Table.Td>
-                    <Table.Td>{tpl.recurrence.join(",")}</Table.Td>
-                    <Table.Td>{tpl.tasks.length}</Table.Td>
-                    <Table.Td>
-                      <Group justify="flex-end" gap="xs">
-                        <Button size="xs" variant="default" onClick={() => { setActiveTplId(tpl.id); setTplDraft(tpl); setEditTplOpen(true); }}>Edit</Button>
-                        <Button size="xs" variant="default" onClick={() => upsertTemplate(tpl, "duplicate")}>Duplicate</Button>
-                        <ActionIcon color="red" variant="subtle" onClick={() => removeTemplate(tpl.id)} title="Delete"><IconTrash size={16} /></ActionIcon>
-                      </Group>
-                    </Table.Td>
-                  </Table.Tr>
-                );
-              })}
-            </Table.Tbody>
-          </Table>
-
-          <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
-
-          <Modal opened={createTplOpen || editTplOpen} onClose={() => { setCreateTplOpen(false); setEditTplOpen(false); }} title="Template" centered>
-            <Stack gap="sm">
-              <TextInput label="Template name" value={tplDraft.name} onChange={(e) => setTplDraft({ ...tplDraft, name: e.target.value })} />
-              <Group grow wrap="nowrap">
-                <Select
-                  label="Location"
-                  value={tplDraft.locationId}
-                  onChange={(v) => setTplDraft({ ...tplDraft, locationId: v })}
-                  data={locationOptions}
-                  comboboxProps={{ withinPortal: true, zIndex: 11000 }}
-                />
-                <Select
-                  label="Time block"
-                  value={tplDraft.timeBlockId}
-                  onChange={(v) => setTplDraft({ ...tplDraft, timeBlockId: v })}
-                  data={timeBlockOptions}
-                  comboboxProps={{ withinPortal: true, zIndex: 11000 }}
-                />
-              </Group>
-              <Select
-                label="Days of week (0=Sun...6=Sat)"
-                data={["0", "1", "2", "3", "4", "5", "6"].map(x => ({ value: x, label: x }))}
-                value={tplDraft.recurrence.map(String)}
-                onChange={(arr) => setTplDraft({ ...tplDraft, recurrence: (arr || []).map(x => Number(x)) })}
-                multiple
-                searchable
-                comboboxProps={{ withinPortal: true, zIndex: 11000 }}
-              />
-
-              <TaskEditor
-                tasks={tplDraft.tasks}
-                onAdd={(task) => addTaskToDraftTemplate(task)}
-                onChange={(taskId, patch) => updateTaskInDraftTemplate(taskId, patch)}
-                onRemove={(taskId) => removeTaskFromDraftTemplate(taskId)}
-              />
-
-              <Group justify="flex-end">
-                <Button onClick={() => {
-                  upsertTemplate(tplDraft, createTplOpen ? "create" : "update");
-                  setCreateTplOpen(false);
-                  setEditTplOpen(false);
-                }}>
-                  Save template
-                </Button>
-              </Group>
-            </Stack>
-          </Modal>
-        </Stack>
-      )}
-
-      {tab === "adhoc" && (
+      <Modal opened={pinModal.open} onClose={() => setPinModal({ open: false, userId: null, email: "", pin: "" })} title={`Set PIN for ${pinModal.email}`} centered>
         <Stack>
-          <Group justify="space-between" mb="xs">
-            <Text fw={600}>Ad-hoc (one-off) tasks</Text>
-            <Button leftSection={<IconPlus size={16} />} onClick={() => { setAdhocDraft(initAdhocDraft(settings.locations?.[0]?.id)); setAdhocOpen(true); }}>
-              Add ad-hoc
-            </Button>
+          <TextInput
+            type="password"
+            label="New PIN (4–8 digits)"
+            value={pinModal.pin}
+            onChange={(e) => setPinModal({ ...pinModal, pin: e.target.value })}
+          />
+          <Group justify="flex-end">
+            <Button onClick={savePin}>Save PIN</Button>
           </Group>
-
-          <Table highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Date</Table.Th>
-                <Table.Th>Location</Table.Th>
-                <Table.Th>Time block</Table.Th>
-                <Table.Th>Tasks</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {stores.overrides.map(ovr => {
-                const tb = stores.timeBlocks.find(x => x.id === ovr.timeBlockId);
-                const loc = settings.locations.find(l => l.id === ovr.locationId);
-                return (
-                  <Table.Tr key={ovr.id}>
-                    <Table.Td>{ovr.date}</Table.Td>
-                    <Table.Td>{loc?.name || "-"}</Table.Td>
-                    <Table.Td>{tb ? `${tb.name} (${tb.start}–${tb.end})` : ovr.timeBlockId}</Table.Td>
-                    <Table.Td>{ovr.tasks.length}</Table.Td>
-                  </Table.Tr>
-                )
-              })}
-            </Table.Tbody>
-          </Table>
-
-          <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
-
-          <Modal opened={adhocOpen} onClose={() => setAdhocOpen(false)} title="Ad-hoc tasks" centered>
-            <Stack>
-              <Group grow>
-                <TextInput label="Date (YYYY-MM-DD)" value={adhocDraft.date} onChange={(e) => setAdhocDraft({ ...adhocDraft, date: e.target.value })} />
-                <Select
-                  label="Location"
-                  value={adhocDraft.locationId}
-                  onChange={(v) => setAdhocDraft({ ...adhocDraft, locationId: v })}
-                  data={locationOptions}
-                  comboboxProps={{ withinPortal: true, zIndex: 11000 }}
-                />
-                <Select
-                  label="Time block"
-                  value={adhocDraft.timeBlockId}
-                  onChange={(v) => setAdhocDraft({ ...adhocDraft, timeBlockId: v })}
-                  data={timeBlockOptions}
-                  comboboxProps={{ withinPortal: true, zIndex: 11000 }}
-                />
-              </Group>
-
-              <TaskEditor
-                tasks={adhocDraft.tasks}
-                onAdd={(task) => addTaskToAdhoc(task)}
-                onChange={(taskId, patch) => {
-                  setAdhocDraft(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, ...patch } : t) }))
-                }}
-                onRemove={(taskId) => removeTaskFromAdhoc(taskId)}
-              />
-
-              <Group justify="flex-end">
-                <Button onClick={saveAdhocOverride}>Save ad-hoc</Button>
-              </Group>
-            </Stack>
-          </Modal>
         </Stack>
-      )}
+      </Modal>
     </Card>
   );
 }
 
-// Simple task editor reused for template and ad-hoc dialogs
-function TaskEditor({ tasks, onAdd, onChange, onRemove }) {
-  const [draft, setDraft] = useState({
-    title: "",
-    category: "",
-    inputType: "checkbox", // 'checkbox' | 'number' | 'text'
-    min: null,
-    max: null,
-    noteRequired: false,
-    photoRequired: false,
-    allowNA: true,
-    priority: 3
-  });
 
-  function resetDraft() {
-    setDraft({
-      title: "",
-      category: "",
-      inputType: "checkbox",
-      min: null,
-      max: null,
-      noteRequired: false,
-      photoRequired: false,
-      allowNA: true,
-      priority: 3
-    });
+function DataPaneSimple() {
+  const [dump, setDump] = useState(null);
+
+  async function grab() {
+    const out = {};
+    const a = await supabase.from("location").select("*").order("name");
+    const b = await supabase.from("time_block").select("*").order("start_time");
+    const c = await supabase.from("tasklist_template").select("*").order("name");
+    const d = await supabase.from("tasklist_task").select("*").order("title");
+    out.location = a.data || [];
+    out.time_block = b.data || [];
+    out.tasklist_template = c.data || [];
+    out.tasklist_task = d.data || [];
+    setDump(out);
   }
 
-  return (
-    <Stack gap="sm">
-      <Text fw={600}>Tasks</Text>
-
-      <Table withColumnBorders={false} highlightOnHover>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Title</Table.Th>
-            <Table.Th className="hide-sm">Category</Table.Th>
-            <Table.Th>Type</Table.Th>
-            <Table.Th className="hide-sm">Range</Table.Th>
-            <Table.Th className="hide-sm">Rules</Table.Th>
-            <Table.Th>Priority</Table.Th>
-            <Table.Th></Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {tasks.map(t => (
-            <Table.Tr key={t.id}>
-              <Table.Td>
-                <TextInput value={t.title} onChange={(e) => onChange(t.id, { title: e.target.value })} />
-              </Table.Td>
-              <Table.Td className="hide-sm">
-                <TextInput value={t.category || ""} onChange={(e) => onChange(t.id, { category: e.target.value })} />
-              </Table.Td>
-              <Table.Td>
-                <Select
-                  value={t.inputType}
-                  onChange={(v) => onChange(t.id, { inputType: v })}
-                  data={["checkbox", "number", "text"].map(x => ({ value: x, label: x }))}
-                  comboboxProps={{ withinPortal: true, zIndex: 11000 }}
-                />
-              </Table.Td>
-              <Table.Td className="hide-sm">
-                <Group gap="xs" wrap="nowrap">
-                  <NumberInput placeholder="min" value={t.min ?? ""} onChange={(v) => onChange(t.id, { min: v === "" ? null : Number(v) })} style={{ width: rem(90) }} />
-                  <NumberInput placeholder="max" value={t.max ?? ""} onChange={(v) => onChange(t.id, { max: v === "" ? null : Number(v) })} style={{ width: rem(90) }} />
-                </Group>
-              </Table.Td>
-              <Table.Td className="hide-sm">
-                <Group gap="xs">
-                  <Switch label="Photo" checked={!!t.photoRequired} onChange={(e) => onChange(t.id, { photoRequired: e.currentTarget.checked })} />
-                  <Switch label="Note" checked={!!t.noteRequired} onChange={(e) => onChange(t.id, { noteRequired: e.currentTarget.checked })} />
-                  <Switch label="N/A" checked={!!t.allowNA} onChange={(e) => onChange(t.id, { allowNA: e.currentTarget.checked })} />
-                </Group>
-              </Table.Td>
-              <Table.Td>
-                <NumberInput min={1} max={5} value={t.priority ?? 3} onChange={(v) => onChange(t.id, { priority: Number(v) || 3 })} style={{ width: rem(80) }} />
-              </Table.Td>
-              <Table.Td>
-                <ActionIcon color="red" variant="subtle" onClick={() => onRemove(t.id)} title="Remove"><IconTrash size={16} /></ActionIcon>
-              </Table.Td>
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
-
-      <Card withBorder radius="md" className="u-card">
-        <Text fw={600} mb="xs">Add task</Text>
-        <Group align="flex-end" gap="xs" wrap="wrap">
-          <TextInput label="Title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} style={{ minWidth: rem(220) }} />
-          <TextInput label="Category" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} />
-          <Select
-            label="Type"
-            value={draft.inputType}
-            onChange={(v) => setDraft({ ...draft, inputType: v })}
-            data={["checkbox", "number", "text"].map(x => ({ value: x, label: x }))}
-            comboboxProps={{ withinPortal: true, zIndex: 11000 }}
-          />
-          <NumberInput label="Min" value={draft.min ?? ""} onChange={(v) => setDraft({ ...draft, min: v === "" ? null : Number(v) })} style={{ width: rem(100) }} />
-          <NumberInput label="Max" value={draft.max ?? ""} onChange={(v) => setDraft({ ...draft, max: v === "" ? null : Number(v) })} style={{ width: rem(100) }} />
-          <Switch label="Photo req" checked={draft.photoRequired} onChange={(e) => setDraft({ ...draft, photoRequired: e.currentTarget.checked })} />
-          <Switch label="Note req" checked={draft.noteRequired} onChange={(e) => setDraft({ ...draft, noteRequired: e.currentTarget.checked })} />
-          <Switch label="Allow N/A" checked={draft.allowNA} onChange={(e) => setDraft({ ...draft, allowNA: e.currentTarget.checked })} />
-          <NumberInput label="Priority" min={1} max={5} value={draft.priority} onChange={(v) => setDraft({ ...draft, priority: Number(v) || 3 })} style={{ width: rem(100) }} />
-          <Button onClick={() => { if (!draft.title.trim()) return; onAdd(draft); resetDraft(); }}>Add</Button>
-        </Group>
-      </Card>
-    </Stack>
-  );
-}
-
-function ComingSoon({ label }) {
-  return (
-    <Card withBorder radius="md">
-      <Text fw={700} mb="sm">{label}</Text>
-      <Text c="dimmed">Coming soon</Text>
-    </Card>
-  );
-}
-
-function DataPane({ settings, submissions, onImportSettings, onSeedDemo }) {
   const download = (filename, obj) => {
     const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -949,41 +884,20 @@ function DataPane({ settings, submissions, onImportSettings, onSeedDemo }) {
     URL.revokeObjectURL(url);
   };
 
-  const handleImport = (file) => {
-    if (!file) return;
-    const r = new FileReader();
-    r.onload = () => {
-      try {
-        const json = JSON.parse(String(r.result));
-        onImportSettings(json);
-        alert("Settings imported");
-      } catch {
-        alert("Invalid JSON");
-      }
-    };
-    r.readAsText(file);
-  };
-
   return (
     <Card withBorder radius="md">
       <Text fw={700} mb="sm">Data & Export</Text>
       <Stack gap="sm">
         <Group>
-          <Button onClick={() => download("settings.json", settings)}>Export settings</Button>
-          <FileButton onChange={handleImport} accept="application/json">
-            {(props) => <Button variant="default" {...props}>Import settings</Button>}
-          </FileButton>
+          <Button onClick={grab}>Fetch current DB snapshot</Button>
+          <Button variant="default" onClick={() => dump && download("db-snapshot.json", dump)} disabled={!dump}>
+            Export snapshot
+          </Button>
         </Group>
-
-        <Group>
-          <Button onClick={() => download("submissions.json", submissions)}>Export submissions</Button>
-          <Button variant="default" onClick={() => onSeedDemo?.()}>Seed demo submissions</Button>
-        </Group>
-
-        <Text c="dimmed" fz="sm">
-          Use “Seed demo submissions” to generate realistic historical data for the Manager Dashboard/filters.
-        </Text>
+        <Text c="dimmed" fz="sm">Grab a quick JSON snapshot of your core tables for debugging or migration.</Text>
+        {dump && <Text fz="xs" c="dimmed">Rows: loc {dump.location.length}, tb {dump.time_block.length}, tpl {dump.tasklist_template.length}, task {dump.tasklist_task.length}</Text>}
       </Stack>
     </Card>
   );
 }
+

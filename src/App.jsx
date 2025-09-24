@@ -1024,9 +1024,9 @@ function AppInner() {
       .eq("id", id)
       .single();
     if (error) throw error;
-  
+
     const tlName = (tasklistsToday.find(tl => tl.id === data.tasklist_id)?.name) || data.tasklist_id;
-  
+
     return {
       id: data.id,
       tasklistId: data.tasklist_id,
@@ -1050,7 +1050,7 @@ function AppInner() {
       })),
     };
   }
-  
+
 
   async function ensureDraftSubmissionId({ tlId, locationId, employee }) {
     const today = new Date().toISOString().slice(0, 10);
@@ -1101,7 +1101,7 @@ function AppInner() {
     const subId = await ensureDraftSubmissionId({
       tlId: tl.id, locationId: activeLocationId, employee: currentEmployee
     });
-  
+
     const { error } = await supabase
       .from("submission")
       .update({
@@ -1110,11 +1110,11 @@ function AppInner() {
         // status stays 'Pending' for manager review
       })
       .eq("id", subId);
-  
+
     if (error) throw error;
     return subId;
   }
-  
+
 
   const { settings } = useSettings();
   const [currentEmployee, setCurrentEmployee] = useState("Employee A");
@@ -1389,10 +1389,10 @@ function AppInner() {
       alert("Finish required inputs first.");
       return;
     }
-  
+
     const next = { status: "Complete", value: state.value ?? true };
     updateTaskState(tl.id, task.id, next); // optimistic
-  
+
     try {
       const subId = await ensureDraftSubmissionId({
         tlId: tl.id, locationId: activeLocationId, employee: currentEmployee
@@ -1413,7 +1413,7 @@ function AppInner() {
       alert(`Could not save: ${e.message}`);
     }
   }
-  
+
 
 
 
@@ -1424,10 +1424,10 @@ function AppInner() {
       const path = `${activeLocationId}/${tl.id}/${task.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
       const { error } = await supabase.storage.from(EVIDENCE_BUCKET).upload(path, file, { upsert: false });
       if (error) throw error;
-  
+
       // local
       updateTaskState(tl.id, task.id, (ti) => ({ photos: [...(ti.photos || []), path] }));
-  
+
       // db
       const subId = await ensureDraftSubmissionId({
         tlId: tl.id, locationId: activeLocationId, employee: currentEmployee
@@ -1445,7 +1445,7 @@ function AppInner() {
       alert(`Upload failed: ${e.message}`);
     }
   }
-  
+
 
   function canSubmitTasklist(tl) {
     const states = working[tl.id] || [];
@@ -1461,24 +1461,26 @@ function AppInner() {
 
   async function signoff(tl) {
     if (!canSubmitTasklist(tl)) { alert("Please complete all required tasks first."); return; }
-  
+
     setPinModal({
       open: true,
       onConfirm: async (pin) => {
         try {
           const realId = await persistSubmissionToDB({ tl, pin, activeLocationId, currentEmployee, working });
-  
+
           // pull the server copy we just created
           const submitted = await fetchSubmissionWithTasks(realId, tasklistsToday);
-  
+
           // prepend to the list you render in Manager view / review queue
           setSubmissions(prev => [submitted, ...prev]);
-  
+
           // clear working state for that template (so the employee sees a fresh list)
-          setWorking(prev => ({ ...prev, [tl.id]: (prev[tl.id] || []).map(t => ({
-            ...t, status: "Incomplete", value: null, note: "", photos: [], na: false, reviewStatus: "Pending"
-          })) }));
-  
+          setWorking(prev => ({
+            ...prev, [tl.id]: (prev[tl.id] || []).map(t => ({
+              ...t, status: "Incomplete", value: null, note: "", photos: [], na: false, reviewStatus: "Pending"
+            }))
+          }));
+
           alert("Submitted for manager review.");
         } catch (err) {
           console.error(err);
@@ -1489,7 +1491,7 @@ function AppInner() {
       },
     });
   }
-  
+
 
 
   useEffect(() => {
@@ -1541,9 +1543,9 @@ function AppInner() {
               />
 
               <Select
-                value={activeLocationId}
+                value={activeLocationId || (locations[0]?.id ?? "")}
                 onChange={(v) => v && setActiveLocationId(v)}
-                data={locations.map((l) => ({ value: l.id, label: l.name }))}
+                data={locations.map(l => ({ value: l.id, label: l.name }))}
                 w={200}
                 placeholder={locLoading ? "Loading…" : "Select location"}
                 disabled={locLoading || locations.length === 0}
@@ -1602,6 +1604,9 @@ function AppInner() {
     </MantineProvider>
   );
 }
+
+
+
 
 export default function App() {
   return (
