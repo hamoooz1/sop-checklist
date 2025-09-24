@@ -5,8 +5,8 @@ import {
   NavLink, Grid, Modal, ActionIcon, rem,
 } from "@mantine/core";
 import { IconUpload, IconDeviceFloppy, IconTrash, IconPlus, IconSettings } from "@tabler/icons-react";
-import { supabase } from "./lib/supabase";
-import { useSettings } from "./settings-store.jsx";
+import { supabase } from "../../lib/supabase.js";
+import { useSettings } from "../../settings-store.jsx";
 /* -------------------------------------------------------
    Small helpers
 ------------------------------------------------------- */

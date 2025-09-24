@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { useLocations } from "./useLocations";
-import { useTasklistsToday } from "./useTasklistsToday";
-import AdminView from "./AdminView";
+import { useLocations } from "../hooks/useLocations.js";
+import { useTasklistsToday } from "../hooks/useTasklistsToday.js";
+import AdminView from "../components/Admin/AdminView.jsx";
 import {
   MantineProvider,
   createTheme,
@@ -28,7 +28,7 @@ import {
   Tabs,
 } from "@mantine/core";
 import { useMediaQuery, useLocalStorage } from "@mantine/hooks";
-import { supabase } from "./lib/supabase";
+import { supabase } from "../lib/supabase.js";
 import {
   BarChart,
   Bar,
@@ -39,7 +39,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
-import { SettingsProvider, useSettings } from "./settings-store.jsx";
+import { SettingsProvider, useSettings } from "../settings-store.jsx";
 
 /** ---------------------- Mock Data (UI only) ---------------------- */
 
