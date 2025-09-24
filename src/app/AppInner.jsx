@@ -1,21 +1,22 @@
-// src/app/AppInner.jsx
-import { useEffect, useMemo, useState } from 'react';
-import { MantineProvider, AppShell, Group, Select, Container, SegmentedControl, Text } from '@mantine/core';
-import { useCompany } from '../hooks/useCompany';
-import { useLocations } from '../hooks/useLocations';
-import { useEmployeesForLocation } from '../hooks/useEmployeesForLocation';
-import { useTasklistsToday } from '../hooks/useTasklistsToday';
-import { useSubmissions } from '../hooks/useSubmissions';
-import { useTimeBlocks } from '../hooks/useTimeBlocks';
-import EmployeeView from '../components/Employee/EmployeeView';
-import ManagerView from '../components/Manager/ManagerView';
-import AdminView from '../components/Admin/AdminView';
+import React, { useEffect, useState } from "react";
+import { MantineProvider, AppShell, Group, Select, Container, SegmentedControl, Text } from "@mantine/core";
+import { useCompany } from "../hooks/useCompany";
+import { useLocations } from "../hooks/useLocations";
+import { useEmployeesForLocation } from "../hooks/useEmployeesForLocation";
+import { useTasklistsToday } from "../hooks/useTasklistsToday";
+import { useSubmissions } from "../hooks/useSubmissions";
+import { useTimeBlocks } from "../hooks/useTimeBlocks";
+import EmployeeView from "../components/Employee/EmployeeView";
+import ManagerView from "../components/Manager/ManagerView";
+import AdminView from "../components/Admin/AdminView";
+import { mapTasklistRow } from "./dbAdapters";
 
 export default function AppInner() {
   const { company } = useCompany();
   const tz = company?.timezone || 'UTC';
   const { locations, loading: locLoading } = useLocations();
   const [activeLocationId, setActiveLocationId] = useState('');
+
   useEffect(() => {
     if (!locations.length) return;
     if (!activeLocationId || !locations.find(l => l.id === activeLocationId)) {
@@ -25,9 +26,13 @@ export default function AppInner() {
 
   const employees = useEmployeesForLocation(activeLocationId);
   const [currentEmployee, setCurrentEmployee] = useState('');
+  
   useEffect(() => {
-    if (!employees.length) { setCurrentEmployee(''); return; }
-    if (!currentEmployee || !employees.find(e => (e.email||e.id) === currentEmployee)) {
+    if (!employees.length) { 
+      setCurrentEmployee(""); 
+      return; 
+    }
+    if (!currentEmployee || !employees.find(e => (e.email || e.id) === currentEmployee)) {
       setCurrentEmployee(employees[0].email || employees[0].id);
     }
   }, [employees, currentEmployee]);
@@ -39,11 +44,6 @@ export default function AppInner() {
 
   const [mode, setMode] = useState('employee');
 
-  useEffect(() => {
-    // brand color live apply
-    if (company?.brand_color) document.documentElement.style.setProperty('--brand', company.brand_color);
-  }, [company?.brand_color]);
-
   const timeBlockLabel = (id) => {
     const tb = timeBlocks.find(t => t.id === id);
     return tb ? `${tb.name} (${tb.start_time}–${tb.end_time})` : id;
@@ -51,6 +51,7 @@ export default function AppInner() {
 
   const employeeOptions = employees.map(u => u.email || u.id);
   const locationOptions = locations.map(l => ({ value: l.id, label: l.name }));
+
 
   return (
     <MantineProvider>
@@ -85,6 +86,7 @@ export default function AppInner() {
             </Group>
           </Group>
         </AppShell.Header>
+
         <AppShell.Main>
           <Container size="xl">
             {mode === 'employee' && (

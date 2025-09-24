@@ -1,4 +1,3 @@
-// src/services/company.js
 import { supabase } from '../lib/supabase';
 
 export async function getCompany() {
@@ -6,6 +5,7 @@ export async function getCompany() {
   if (error) throw error;
   return data || null;
 }
+
 export async function updateCompany(patch) {
   const c = await getCompany();
   if (c) {
