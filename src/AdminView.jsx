@@ -7,25 +7,17 @@ import {
 import { IconUpload, IconDeviceFloppy, IconTrash, IconPlus, IconSettings } from "@tabler/icons-react";
 import { useSettings } from "./settings-store.jsx";
 import { supabase } from "./lib/supabase.js";
+import fetchUsers from "./queries.js";
 
 export default function AdminView({ tasklists, submissions }) {
   const [view, setView] = useState("company");
   const { settings, updateSettings } = useSettings();
   const [draft, setDraft] = useState(settings);
-  const [users, setUsers] = useState('');
+  const [users, setUsers] = useState([]);
   const [locations, setLocations] = useState('');
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      const { data, error } = await supabase.from('users').select('*');
-      if (error) {
-        console.error(error);
-      } else {
-        setUsers(data);  // Set users in the state
-      }
-    };
-  
-    fetchUsers();
+    setUsers(fetchUsers());
   }, []);
   
   useEffect(() => {

@@ -36,7 +36,7 @@ import {
 import { useLocalStorage } from "@mantine/hooks";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
 import { SettingsProvider, useSettings } from "./settings-store.jsx";
-import {fetchUsers, fetchLocations} from "./queries.js";
+import fetchUsers, { fetchLocations } from "./queries.js";
 
 /** ---------------------- Mock Data ---------------------- */
 const TIME_BLOCKS = [
@@ -264,7 +264,17 @@ function EmployeeView({
       <Text fw={700} fz="lg">Today</Text>
 
       {tasklists.map((tl) => {
-        const states = working[tl.id];
+        const states =
+          working?.[tl.id] ??
+          tl.tasks.map((t) => ({
+            taskId: t.id,
+            status: "Incomplete",
+            value: null,
+            note: "",
+            photos: [],
+            na: false,
+            reviewStatus: "Pending",
+          }));
         const total = tl.tasks.length;
         const done = states.filter((t) => t.status === "Complete" || t.na).length;
         const canSubmit = tl.tasks.every((t) => {
@@ -567,6 +577,7 @@ function ManagerView({
   setWorking,
   getTaskMeta,
   settings,
+  locations
 }) {
   // ---------- Filters ----------
   const [filters, setFilters] = useState({
@@ -579,7 +590,7 @@ function ManagerView({
   });
 
   const locationOptions = [{ value: "", label: "All locations" }].concat(
-    settings.locations.map((l) => ({ value: l.id, label: l.name }))
+    locations.map((l) => ({ value: String(l.id), label: l.name }))
   );
   const employeeOptions = [{ value: "", label: "All employees" }].concat(
     Array.from(
@@ -811,7 +822,7 @@ function ManagerView({
                 <div>
                   <Text fw={600}>{s.tasklistName}</Text>
                   <Text c="dimmed" fz="sm">
-                    {s.date} • {settings.locations.find((l) => l.id === s.locationId)?.name || s.locationId} • By: {s.submittedBy || s.signedBy}
+                    {s.date} • {locations.find((l) => String(l.id) === String(s.locationId))?.name || s.locationId} • By: {s.submittedBy || s.signedBy}
                   </Text>
                 </div>
                 <Badge variant="light" color={s.status === "Approved" ? "green" : s.status === "Rework" ? "yellow" : "gray"}>
@@ -972,11 +983,12 @@ function AppInner() {
     let alive = true;
     (async () => {
       try {
-        const rows = await fetchUsers();
+        const [users, locs] = await Promise.all([fetchUsers(), fetchLocations()]);
         if (!alive) return;
-        setEmployees(rows);
-        // pick first row’s id as default selection (string for Mantine <Select/>)
-        if (rows.length) setCurrentEmployee(String(rows[0].id));
+        setEmployees(users);
+        setLocations(locs);
+        if (users.length) setCurrentEmployee(String(users[0].id));
+        if (locs.length) setActiveLocationId(String(locs[0].id));
       } catch (e) {
         console.error(e);
       }
@@ -1006,14 +1018,15 @@ function AppInner() {
 
 
   const [mode, setMode] = useState("employee");
-  const [activeLocationId, setActiveLocationId] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [activeLocationId, setActiveLocationId] = useState("");
 
   // Keep activeLocation valid when Admin edits locations
   useEffect(() => {
-    if (!settings.locations.find((l) => l.id === activeLocationId)) {
-      setActiveLocationId(settings.locations[0]?.id || "");
+    if (!locations.find((l) => String(l.id) === String(activeLocationId))) {
+      setActiveLocationId(locations[0]?.id ? String(locations[0].id) : "");
     }
-  }, [settings.locations, activeLocationId]);
+  }, [locations, activeLocationId]);
 
   // Today’s tasklists (from admin templates + ad-hoc)
   const tasklistsToday = useMemo(() => {
@@ -1128,63 +1141,73 @@ function AppInner() {
     });
   }
   const handleComplete = async (tasklist, task) => {
-    const taskState = { status: "Complete", value: task.value || true };
-    
-    if (!canTaskBeCompleted(task, state)) {
+    const st = working?.[tasklist.id]?.find((s) => s.taskId === task.id) ?? {};
+    const taskState = { status: "Complete", value: st.value ?? task.value ?? true };
+
+    if (!canTaskBeCompleted(task, st)) {
       alert("Finish required inputs first (photo/note/number in range).");
       return;
     }
-    // Update task state in Supabase
     const { error } = await supabase
-      .from('tasks')  // Replace with your actual table name
+      .from("tasks")
       .update(taskState)
-      .eq('id', task.id)
-      .eq('tasklist_id', tasklist.id);  // Identify tasklist
-  
+      .eq("id", task.id)
+      .eq("tasklist_id", tasklist.id);
+
     if (error) {
       console.error(error);
-      alert('Failed to complete task');
+      alert("Failed to complete task");
+    } else {
+      setWorking((prev) => ({
+        ...prev,
+        [tasklist.id]: (prev[tasklist.id] ?? []).map((ti) =>
+          ti.taskId === task.id ? { ...ti, status: "Complete" } : ti
+        ),
+      }));
     }
   };
 
   const handleUpload = async (tasklist, task, file) => {
-  // Upload file to Supabase Storage
-  const { data, error } = await supabase.storage
-    .from('task-evidence')  // Replace with your actual bucket name
-    .upload(`task_${task.id}/${file.name}`, file);
+    // Upload file to Supabase Storage
+    const { data, error } = await supabase.storage
+      .from('evidence')  // Replace with your actual bucket name
+      .upload(`task_${task.id}/${file.name}`, file);
 
-  if (error) {
-    console.error(error);
-    alert('Failed to upload file');
-    return;
-  }
+    if (error) {
+      console.error(error);
+      alert('Failed to upload file');
+      return;
+    }
 
-  // Get the file URL
-  const fileUrl = `https://your-supabase-url.supabase.co/storage/v1/object/public/task-evidence/${data.path}`;
+    // Get the file URL
+    const { data: pub } = supabase.storage.from("evidence").getPublicUrl(data.path);
+    const fileUrl = pub.publicUrl;
 
-  // Update task with the uploaded photo link
-  const { error: updateError } = await supabase
-    .from('tasks')  // Replace with your actual table name
-    .update({ photos: [fileUrl] })
-    .eq('id', task.id)
-    .eq('tasklist_id', tasklist.id);
+    // Update task with the uploaded photo link
+    const { error: updateError } = await supabase
+      .from('tasks')  // Replace with your actual table name
+      .update({ photos: [fileUrl] })
+      .eq('id', task.id)
+      .eq('tasklist_id', tasklist.id);
 
-  if (updateError) {
-    console.error(updateError);
-    alert('Failed to update task with file');
-  }
-};
+    if (updateError) {
+      console.error(updateError);
+      alert('Failed to update task with file');
+    }
+  };
 
 
   function canSubmitTasklist(tl) {
-    const states = working[tl.id];
+    const states = working[tl.id] ?? [];
     for (const t of tl.tasks) {
-      const st = states.find((s) => s.taskId === t.id);
+      const st = states.find((s) => s.taskId === t.id) || {};
       const ok = (st.status === "Complete" || st.na) && canTaskBeCompleted(t, st);
       if (!ok) return false;
     }
     return true;
   }
+
+
   function signoff(tl) {
     if (!canSubmitTasklist(tl)) {
       alert("Please complete all required tasks first.");
@@ -1193,7 +1216,7 @@ function AppInner() {
     setPinModal({
       open: true,
       onConfirm: (pin) => {
-        const payload = working[tl.id].map((t) => ({ ...t, reviewStatus: "Pending" }));
+        const payload = (working[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" }));
         const submission = {
           id: `ci_${Date.now()}`,
           tasklistId: tl.id,
@@ -1202,12 +1225,15 @@ function AppInner() {
           date: todayISO(),
           status: "Pending",
           signedBy: `PIN-${pin}`,
-          submittedBy: currentEmployee, // NEW: who did it
+          submittedBy: currentEmployee,
           signedAt: new Date().toISOString(),
           tasks: payload,
         };
         setSubmissions((prev) => [submission, ...prev]);
-        setWorking((prev) => ({ ...prev, [tl.id]: prev[tl.id].map((t) => ({ ...t, reviewStatus: "Pending" })) }));
+        setWorking((prev) => ({
+          ...prev,
+          [tl.id]: (prev[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" })),
+        }));
         setPinModal({ open: false, onConfirm: null });
         alert("Submitted for manager review.");
       },
@@ -1216,16 +1242,19 @@ function AppInner() {
 
   // before the return, right after hooks:
   useEffect(() => {
-    // attach a callable onto settings snapshot for Admin Data pane
     settings.__seedDemo = () =>
-      seedDemoSubmissions({ days: 45, perDay: [0, 4], employees: ["Employee A", "Employee B", "Employee C", ...settings.users.map(u => u.email || u.id)] });
+      seedDemoSubmissions({
+        days: 45,
+        perDay: [0, 4],
+        employees: ["Employee A", "Employee B", "Employee C", ...settings.users.map((u) => u.email || u.id)],
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, tasklistsToday]);
 
   return (
     <MantineProvider theme={baseTheme} forceColorScheme={scheme}>
       <AppShell
-        header={{ height: 120}}   // NEW: allow extra height when wrapping
+        header={{ height: 120 }}   // NEW: allow extra height when wrapping
         padding="md"
         withBorder={false}
         styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)" } }}
@@ -1267,7 +1296,7 @@ function AppInner() {
               <Select
                 value={activeLocationId}
                 onChange={(v) => setActiveLocationId(v)}
-                data={settings.locations.map((l) => ({ value: l.id, label: l.name }))}
+                data={locations.map((l) => ({ value: String(l.id), label: l.name }))}
                 w={200}
               />
               <ThemeToggle scheme={scheme} setScheme={setScheme} />
@@ -1298,6 +1327,7 @@ function AppInner() {
                 setWorking={setWorking}
                 getTaskMeta={getTaskMetaToday}
                 settings={settings}
+                locations={locations}
               />
             )}
 

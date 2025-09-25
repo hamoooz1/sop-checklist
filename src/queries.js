@@ -27,7 +27,7 @@ export default async function fetchUsers() {
   return data ?? [];
 }
 
-export default async function fetchLocations() {
+export async function fetchLocations() {
   const { data, error } = await supabase
     .from("location")
     .select("*");
