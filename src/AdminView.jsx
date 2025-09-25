@@ -6,11 +6,41 @@ import {
 } from "@mantine/core";
 import { IconUpload, IconDeviceFloppy, IconTrash, IconPlus, IconSettings } from "@tabler/icons-react";
 import { useSettings } from "./settings-store.jsx";
+import { supabase } from "./lib/supabase.js";
 
 export default function AdminView({ tasklists, submissions }) {
   const [view, setView] = useState("company");
   const { settings, updateSettings } = useSettings();
   const [draft, setDraft] = useState(settings);
+  const [users, setUsers] = useState('');
+  const [locations, setLocations] = useState('');
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      const { data, error } = await supabase.from('users').select('*');
+      if (error) {
+        console.error(error);
+      } else {
+        setUsers(data);  // Set users in the state
+      }
+    };
+  
+    fetchUsers();
+  }, []);
+  
+  useEffect(() => {
+    const fetchLocations = async () => {
+      const { data, error } = await supabase.from('locations').select('*');
+      if (error) {
+        console.error(error);
+      } else {
+        setLocations(data);  // Set locations in the state
+      }
+    };
+  
+    fetchLocations();
+  }, []);
+  
 
   useEffect(() => {
     setDraft(settings);
@@ -149,19 +179,25 @@ function LocationsPane({ settings, setSettings, onSave }) {
   const [addOpen, setAddOpen] = useState(false);
   const [draft, setDraft] = useState({ name: "", timezone: "America/Los_Angeles" });
 
-  const addLocation = () => {
-    if (!draft.name.trim()) return;
-    const id = `loc_${Date.now()}`;
-    setSettings({
-      ...settings,
-      locations: [...settings.locations, { id, name: draft.name.trim(), timezone: draft.timezone, managers: [] }],
-    });
-    setAddOpen(false);
-    setDraft({ name: "", timezone: "America/Los_Angeles" });
+  const addLocation = async (newLocation) => {
+    const { error } = await supabase.from('locations').insert([newLocation]);
+    if (error) {
+      console.error(error);
+      alert("Failed to add location");
+    } else {
+      fetchLocations();  // Refresh locations after adding
+    }
   };
 
-  const removeLocation = (id) =>
-    setSettings({ ...settings, locations: settings.locations.filter((l) => l.id !== id) });
+  const removeLocation = async (id) => {
+    const { error } = await supabase.from('locations').delete().eq('id', id);
+    if (error) {
+      console.error(error);
+      alert("Failed to remove location");
+    } else {
+      fetchLocations();  // Refresh locations after removing
+    }
+  };
 
   return (
     <Card withBorder radius="md">

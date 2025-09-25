@@ -36,6 +36,7 @@ import {
 import { useLocalStorage } from "@mantine/hooks";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
 import { SettingsProvider, useSettings } from "./settings-store.jsx";
+import {fetchUsers, fetchLocations} from "./queries.js";
 
 /** ---------------------- Mock Data ---------------------- */
 const TIME_BLOCKS = [
@@ -963,15 +964,36 @@ const baseTheme = createTheme({
 
 function AppInner() {
   const { settings } = useSettings();
-  const [currentEmployee, setCurrentEmployee] = useState("Employee A");
-  const employeeOptions = [
-    "Employee A",
-    "Employee B",
-    "Employee C",
-    ...settings.users.map((u) => u.email || u.id),
-  ];
-  const isNarrow = useMediaQuery('(max-width: 720px)');
+  const [employees, setEmployees] = useState([]);
+  const [currentEmployee, setCurrentEmployee] = useState("");
 
+  // load once on mount
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rows = await fetchUsers();
+        if (!alive) return;
+        setEmployees(rows);
+        // pick first row’s id as default selection (string for Mantine <Select/>)
+        if (rows.length) setCurrentEmployee(String(rows[0].id));
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // build Mantine <Select/> options
+  const employeeOptions = useMemo(() => {
+    return employees
+      // keep only active if you want; else remove this line
+      .filter(u => u.is_active !== false)
+      .map(u => ({
+        value: String(u.id),                            // Mantine Select expects strings
+        label: u.display_name || u.email || String(u.id) // pick what you have
+      }));
+  }, [employees]);
   useEffect(() => {
     document.documentElement.style.setProperty("--brand", settings.company.brandColor || "#0ea5e9");
   }, [settings.company.brandColor])
@@ -982,8 +1004,9 @@ function AppInner() {
     defaultValue: "light",
   });
 
+
   const [mode, setMode] = useState("employee");
-  const [activeLocationId, setActiveLocationId] = useState(() => settings.locations?.[0]?.id || "loc_001");
+  const [activeLocationId, setActiveLocationId] = useState([]);
 
   // Keep activeLocation valid when Admin edits locations
   useEffect(() => {
@@ -1104,17 +1127,55 @@ function AppInner() {
       return next;
     });
   }
-  function handleComplete(tl, task) {
-    const state = working[tl.id].find((s) => s.taskId === task.id);
+  const handleComplete = async (tasklist, task) => {
+    const taskState = { status: "Complete", value: task.value || true };
+    
     if (!canTaskBeCompleted(task, state)) {
       alert("Finish required inputs first (photo/note/number in range).");
       return;
     }
-    updateTaskState(tl.id, task.id, { status: "Complete", value: state.value ?? true });
+    // Update task state in Supabase
+    const { error } = await supabase
+      .from('tasks')  // Replace with your actual table name
+      .update(taskState)
+      .eq('id', task.id)
+      .eq('tasklist_id', tasklist.id);  // Identify tasklist
+  
+    if (error) {
+      console.error(error);
+      alert('Failed to complete task');
+    }
+  };
+
+  const handleUpload = async (tasklist, task, file) => {
+  // Upload file to Supabase Storage
+  const { data, error } = await supabase.storage
+    .from('task-evidence')  // Replace with your actual bucket name
+    .upload(`task_${task.id}/${file.name}`, file);
+
+  if (error) {
+    console.error(error);
+    alert('Failed to upload file');
+    return;
   }
-  function handleUpload(tl, task, file) {
-    updateTaskState(tl.id, task.id, (ti) => ({ photos: [...(ti.photos || []), file.name] }));
+
+  // Get the file URL
+  const fileUrl = `https://your-supabase-url.supabase.co/storage/v1/object/public/task-evidence/${data.path}`;
+
+  // Update task with the uploaded photo link
+  const { error: updateError } = await supabase
+    .from('tasks')  // Replace with your actual table name
+    .update({ photos: [fileUrl] })
+    .eq('id', task.id)
+    .eq('tasklist_id', tasklist.id);
+
+  if (updateError) {
+    console.error(updateError);
+    alert('Failed to update task with file');
   }
+};
+
+
   function canSubmitTasklist(tl) {
     const states = working[tl.id];
     for (const t of tl.tasks) {
@@ -1164,7 +1225,7 @@ function AppInner() {
   return (
     <MantineProvider theme={baseTheme} forceColorScheme={scheme}>
       <AppShell
-        header={{ height: isNarrow ? 120 : 64 }}   // NEW: allow extra height when wrapping
+        header={{ height: 120}}   // NEW: allow extra height when wrapping
         padding="md"
         withBorder={false}
         styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)" } }}
