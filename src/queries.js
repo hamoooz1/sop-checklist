@@ -155,6 +155,7 @@ export async function listUsers(companyId) {
 }
 export async function createUser(row) {
   const { error } = await supabase.from("app_user").insert([row]);
+  alert("User Successfully Created!")
   if (error) throw error;
 }
 export async function updateUser(id, patch) {

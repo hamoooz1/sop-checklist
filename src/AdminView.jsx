@@ -6,30 +6,57 @@ import {
 } from "@mantine/core";
 import { IconUpload, IconDeviceFloppy, IconTrash, IconPlus, IconSettings } from "@tabler/icons-react";
 import { useSettings } from "./settings-store.jsx";
-import { supabase } from "./lib/supabase.js";
 import {
-  hydrateSettings, updateCompany,
+  hydrateAll, updateCompany,
   listLocations, createLocation, updateLocation, deleteLocation,
   listUsers, createUser, updateUser, deleteUser,
   listTimeBlocks, upsertTimeBlock, removeTimeBlock,
   listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
-} from "./queries";
+} from "./queries.js";
 
-export default function AdminView({locations}) {
+export default function AdminView() {
   const { settings, updateSettings } = useSettings();
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
   const [view, setView] = useState("company");
   const [draft, setDraft] = useState(settings);
-
-  const companyId = settings.company?.id; // make sure this is set in your SettingsProvider init
+  const [locations, setLocations] = useState([]);
+  
+  const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb"; // make sure this is set in your SettingsProvider init
 
   useEffect(() => {
-    (async () => {
-      const fresh = await hydrateSettings(companyId);
-      updateSettings(fresh);
-    })().catch(console.error);
-  }, [companyId]);
+  let isMounted = true;
+  (async () => {
+    try {
+      const rows = await listLocations();
+      if (isMounted) setLocations(Array.isArray(rows) ? rows : []);
+    } catch (e) {
+      console.error(e);
+      if (isMounted) setLocations([]);
+    }
+  })();
+  return () => { isMounted = false; };
+}, []);
+
+  const [company, setCompany] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [timeBlocks, setTimeBlocks] = useState([]);
+  const [templates, setTemplates] = useState([]);
 
   useEffect(() => setDraft(settings), [settings]);
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const rows = await listUsers(companyId);
+        if (isMounted) setUsers(Array.isArray(rows) ? rows : []);
+      } catch (e) {
+        console.error(e);
+        if (isMounted) setUsers([]);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, [companyId]);
 
   const saveDraftToApp = async () => {
     await updateCompany(companyId, {
@@ -81,8 +108,16 @@ export default function AdminView({locations}) {
       >
         <div style={{ minWidth: 0 }}>
           {view === "company" && <CompanyPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "locations" && <LocationsPane locations={locations}settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "users" && <UsersPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "locations" && <LocationsPane locations={locations} settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "users" && <UsersPane
+            companyId={companyId}
+            users={users}
+            locations={locations}
+            onInvite={async (row) => { await createUser({ ...row, company_id: companyId }); }}
+            onUpdate={async (id, patch) => { await updateUser(id, patch); }}
+            onDelete={async (id) => { await deleteUser(id); }}
+          />
+          }
           {view === "policies" && <PoliciesPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "notifications" && <NotificationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "security" && <SecurityPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
@@ -284,32 +319,15 @@ function LocationsPane({ settings, setSettings, onSave, locations }) {
   );
 }
 
-function UsersPane({ settings, setSettings, onSave }) {
-  const companyId = settings.company.id;
-
-  const refresh = async () => {
-    const users = await listUsers(companyId);
-    setSettings({ ...settings, users: users.map(u => ({
-      id: u.id, email: u.email, display_name: u.display_name,
-      role: u.role, location: u.location, is_active: u.is_active, pin: u.pin
-    })) });
-  };
-
+function UsersPane({ companyId, users, locations, onInvite, onUpdate, onDelete }) {
   const [invite, setInvite] = useState({
-    email: "", display_name: "", role: "Employee",
-    location: settings.locations[0]?.id || null,
-    is_active: true, pin: null
+    email: "",
+    display_name: "",
+    role: "Employee",
+    location: locations[0]?.id || null, // single FK
+    is_active: true,
+    pin: null,
   });
-
-  const addUser = async () => {
-    if (!invite.email.trim()) return;
-    await createUser({ ...invite, company_id: companyId });
-    setInvite({ email: "", display_name: "", role: "Employee", location: null, is_active: true, pin: null });
-    await refresh();
-  };
-
-  const removeUser = (id) =>
-    setSettings({ ...settings, users: settings.users.filter((u) => u.id !== id) });
 
   return (
     <Card withBorder radius="md">
@@ -319,7 +337,7 @@ function UsersPane({ settings, setSettings, onSave }) {
           <TextInput
             label="Name"
             placeholder="John Doe"
-            value={invite.name}
+            value={invite.display_name}
             onChange={(e) => setInvite({ ...invite, display_name: e.target.value })}
           />
           <TextInput
@@ -338,23 +356,20 @@ function UsersPane({ settings, setSettings, onSave }) {
         </Group>
         <Select
           label="Assign to location"
-          data={settings.locations.map((l) => ({ value: l.id, label: l.name }))}
+          data={locations.map((l) => ({ value: l.id, label: l.name }))}
           value={invite.location}
-          onChange={(values) => setInvite({ ...invite, locations: values })}
+          onChange={(v) => setInvite({ ...invite, location: v })}
           comboboxProps={{ withinPortal: true }}
         />
         <Group justify="flex-end">
-          <Button leftSection={<IconPlus size={16} />} onClick={addUser}>Invite</Button>
+          <Button leftSection={<IconPlus size={16} />} onClick={() => invite.email && onInvite(invite)}>Invite</Button>
         </Group>
       </Stack>
 
       <Divider my="md" />
 
       <ScrollArea.Autosize mah={360} type="auto" scrollbarSize={8} styles={{ viewport: { overflowX: "hidden" } }}>
-        <Table
-          highlightOnHover
-          style={{ tableLayout: "fixed", width: "100%" }}
-        >
+        <Table highlightOnHover style={{ tableLayout: "fixed", width: "100%" }}>
           <colgroup>
             <col style={{ width: "36%" }} />
             <col style={{ width: "18%" }} />
@@ -365,46 +380,35 @@ function UsersPane({ settings, setSettings, onSave }) {
             <Table.Tr>
               <Table.Th>Email</Table.Th>
               <Table.Th>Role</Table.Th>
-              <Table.Th>Locations</Table.Th>
+              <Table.Th>Location</Table.Th>
               <Table.Th></Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {settings.users.map((u) => (
+            {users.map((u) => (
               <Table.Tr key={u.id}>
                 <Table.Td style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{u.email}</Table.Td>
                 <Table.Td>
                   <Select
                     value={u.role}
-                    onChange={(v) =>
-                      setSettings({
-                        ...settings,
-                        users: settings.users.map((x) => (x.id === u.id ? { ...x, role: v } : x)),
-                      })
-                    }
+                    onChange={async (v) => onUpdate(u.id, { role: v })}
                     data={["Admin", "Manager", "Employee"]}
                     w="100%"
                     comboboxProps={{ withinPortal: true }}
                   />
                 </Table.Td>
                 <Table.Td>
-                  <MultiSelect
-                    data={settings.locations.map((l) => ({ value: l.id, label: l.name }))}
-                    value={u.locations}
-                    onChange={(vals) =>
-                      setSettings({
-                        ...settings,
-                        users: settings.users.map((x) => (x.id === u.id ? { ...x, locations: vals } : x)),
-                      })
-                    }
-                    searchable
+                  <Select
+                    data={locations.map((l) => ({ value: l.id, label: l.name }))}
+                    value={u.location}
+                    onChange={async (v) => onUpdate(u.id, { location: v })}
                     w="100%"
                     comboboxProps={{ withinPortal: true }}
                   />
                 </Table.Td>
                 <Table.Td>
                   <Group justify="flex-end">
-                    <ActionIcon color="red" variant="subtle" onClick={() => removeUser(u.id)} title="Remove">
+                    <ActionIcon color="red" variant="subtle" onClick={() => onDelete(u.id)} title="Remove">
                       <IconTrash size={16} />
                     </ActionIcon>
                   </Group>
@@ -414,10 +418,6 @@ function UsersPane({ settings, setSettings, onSave }) {
           </Table.Tbody>
         </Table>
       </ScrollArea.Autosize>
-
-      <Group justify="flex-end" mt="sm">
-        <Button leftSection={<IconDeviceFloppy size={16} />} onClick={onSave}>Save</Button>
-      </Group>
     </Card>
   );
 }
