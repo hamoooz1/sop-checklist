@@ -1337,6 +1337,7 @@ function AppInner() {
                   tasklists={MOCK_TASKLISTS}
                   submissions={submissions}
                   onBrandColorChange={() => { }}
+                  locations={locations}
                 />
               </div>
             )}

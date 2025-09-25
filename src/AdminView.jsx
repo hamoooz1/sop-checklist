@@ -7,41 +7,41 @@ import {
 import { IconUpload, IconDeviceFloppy, IconTrash, IconPlus, IconSettings } from "@tabler/icons-react";
 import { useSettings } from "./settings-store.jsx";
 import { supabase } from "./lib/supabase.js";
-import fetchUsers from "./queries.js";
+import {
+  hydrateSettings, updateCompany,
+  listLocations, createLocation, updateLocation, deleteLocation,
+  listUsers, createUser, updateUser, deleteUser,
+  listTimeBlocks, upsertTimeBlock, removeTimeBlock,
+  listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
+} from "./queries";
 
-export default function AdminView({ tasklists, submissions }) {
-  const [view, setView] = useState("company");
+export default function AdminView({locations}) {
   const { settings, updateSettings } = useSettings();
+  const [view, setView] = useState("company");
   const [draft, setDraft] = useState(settings);
-  const [users, setUsers] = useState([]);
-  const [locations, setLocations] = useState('');
+
+  const companyId = settings.company?.id; // make sure this is set in your SettingsProvider init
 
   useEffect(() => {
-    setUsers(fetchUsers());
-  }, []);
-  
-  useEffect(() => {
-    const fetchLocations = async () => {
-      const { data, error } = await supabase.from('locations').select('*');
-      if (error) {
-        console.error(error);
-      } else {
-        setLocations(data);  // Set locations in the state
-      }
-    };
-  
-    fetchLocations();
-  }, []);
-  
+    (async () => {
+      const fresh = await hydrateSettings(companyId);
+      updateSettings(fresh);
+    })().catch(console.error);
+  }, [companyId]);
 
-  useEffect(() => {
-    setDraft(settings);
-  }, [settings]);
+  useEffect(() => setDraft(settings), [settings]);
 
-  const saveDraftToApp = () => {
-    updateSettings(draft);
+  const saveDraftToApp = async () => {
+    await updateCompany(companyId, {
+      name: draft.company.name,
+      brand_color: draft.company.brandColor,
+      timezone: draft.company.timezone,
+    });
+    // Reload to keep UI in sync with DB truth
+    const fresh = await hydrateSettings(companyId);
+    updateSettings(fresh);
     alert("Settings saved");
-  };
+  }
 
   return (
     <div
@@ -81,7 +81,7 @@ export default function AdminView({ tasklists, submissions }) {
       >
         <div style={{ minWidth: 0 }}>
           {view === "company" && <CompanyPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "locations" && <LocationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "locations" && <LocationsPane locations={locations}settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "users" && <UsersPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "policies" && <PoliciesPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "notifications" && <NotificationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
@@ -167,28 +167,29 @@ function CompanyPane({ settings, setSettings, onSave }) {
   );
 }
 
-function LocationsPane({ settings, setSettings, onSave }) {
+function LocationsPane({ settings, setSettings, onSave, locations }) {
   const [addOpen, setAddOpen] = useState(false);
   const [draft, setDraft] = useState({ name: "", timezone: "America/Los_Angeles" });
+  const [locationList, setLocationsList] = useState([]);
 
-  const addLocation = async (newLocation) => {
-    const { error } = await supabase.from('locations').insert([newLocation]);
-    if (error) {
-      console.error(error);
-      alert("Failed to add location");
-    } else {
-      fetchLocations();  // Refresh locations after adding
-    }
+  const refreshLocations = async () => {
+    const locs = await listLocations();
+    setSettings({ ...settings, locations: locs });
+  };
+
+  const addLocation = async (newLoc) => {
+    await createLocation(newLoc);
+    await refreshLocations();
+  };
+
+  const onInlineEdit = async (id, patch) => {
+    await updateLocation(id, patch);
+    await refreshLocations();
   };
 
   const removeLocation = async (id) => {
-    const { error } = await supabase.from('locations').delete().eq('id', id);
-    if (error) {
-      console.error(error);
-      alert("Failed to remove location");
-    } else {
-      fetchLocations();  // Refresh locations after removing
-    }
+    await deleteLocation(id);
+    await refreshLocations();
   };
 
   return (
@@ -217,7 +218,7 @@ function LocationsPane({ settings, setSettings, onSave }) {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {settings.locations.map((l) => (
+            {locations.map((l) => (
               <Table.Tr key={l.id}>
                 <Table.Td>
                   <TextInput
@@ -284,14 +285,27 @@ function LocationsPane({ settings, setSettings, onSave }) {
 }
 
 function UsersPane({ settings, setSettings, onSave }) {
-  const [invite, setInvite] = useState({ email: "", role: "Employee", locations: [] });
+  const companyId = settings.company.id;
 
-  const addUser = () => {
+  const refresh = async () => {
+    const users = await listUsers(companyId);
+    setSettings({ ...settings, users: users.map(u => ({
+      id: u.id, email: u.email, display_name: u.display_name,
+      role: u.role, location: u.location, is_active: u.is_active, pin: u.pin
+    })) });
+  };
+
+  const [invite, setInvite] = useState({
+    email: "", display_name: "", role: "Employee",
+    location: settings.locations[0]?.id || null,
+    is_active: true, pin: null
+  });
+
+  const addUser = async () => {
     if (!invite.email.trim()) return;
-    const id = `u_${Date.now()}`;
-    const user = { id, email: invite.email.trim(), role: invite.role, locations: invite.locations };
-    setSettings({ ...settings, users: [user, ...settings.users] });
-    setInvite({ email: "", role: "Employee", locations: [] });
+    await createUser({ ...invite, company_id: companyId });
+    setInvite({ email: "", display_name: "", role: "Employee", location: null, is_active: true, pin: null });
+    await refresh();
   };
 
   const removeUser = (id) =>
@@ -302,6 +316,12 @@ function UsersPane({ settings, setSettings, onSave }) {
       <Text fw={700} mb="sm">Users & Roles</Text>
       <Stack gap="sm">
         <Group grow wrap="wrap">
+          <TextInput
+            label="Name"
+            placeholder="John Doe"
+            value={invite.name}
+            onChange={(e) => setInvite({ ...invite, display_name: e.target.value })}
+          />
           <TextInput
             label="Email"
             placeholder="person@company.com"
@@ -316,13 +336,11 @@ function UsersPane({ settings, setSettings, onSave }) {
             comboboxProps={{ withinPortal: true }}
           />
         </Group>
-        <MultiSelect
-          label="Assign to locations"
-          placeholder="Pick one or more"
+        <Select
+          label="Assign to location"
           data={settings.locations.map((l) => ({ value: l.id, label: l.name }))}
-          value={invite.locations}
+          value={invite.location}
           onChange={(values) => setInvite({ ...invite, locations: values })}
-          searchable
           comboboxProps={{ withinPortal: true }}
         />
         <Group justify="flex-end">
