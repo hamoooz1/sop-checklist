@@ -21,7 +21,7 @@ export default function AdminView({ onAfterLocationsChange }) {
   const { settings, updateSettings } = useSettings();
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
-  
+
   const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb"; // make sure this is set in your SettingsProvider init
 
   const [view, setView] = useState("company");
@@ -38,8 +38,8 @@ export default function AdminView({ onAfterLocationsChange }) {
   const [locations, setLocations] = useState([]);
   const [users, setUsers] = useState([]);
 
-   // ------- Refreshers
-   const refreshLocations = useCallback(async () => {
+  // ------- Refreshers
+  const refreshLocations = useCallback(async () => {
     const rows = await listLocations();
     setLocations(Array.isArray(rows) ? rows : []);
   }, []);
@@ -121,7 +121,7 @@ export default function AdminView({ onAfterLocationsChange }) {
         style={{ minWidth: 0 }}
       >
         <div style={{ minWidth: 0 }}>
-        {view === "company" && (
+          {view === "company" && (
             <CompanyPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />
           )}
 
@@ -129,7 +129,7 @@ export default function AdminView({ onAfterLocationsChange }) {
             <LocationsPane
               locations={locations}
               companyId={companyId}
-              onAdd={async (row) => { await createLocation(row); await refreshLocations(); onAfterLocationsChange?.();}}
+              onAdd={async (row) => { await createLocation(row); await refreshLocations(); onAfterLocationsChange?.(); }}
               onUpdate={async (id, patch) => {
                 // optimistic
                 setLocations(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
@@ -278,14 +278,14 @@ function LocationsPane({ locations, onAdd, onUpdate, onDelete, companyId }) {
                   <Select
                     value={l.timezone}
                     onChange={(v) => onUpdate(l.id, { timezone: v })}
-                    data={["America/Los_Angeles","America/Vancouver","America/New_York","UTC"]}
+                    data={["America/Los_Angeles", "America/Vancouver", "America/New_York", "UTC"]}
                     w="100%"
                     comboboxProps={{ withinPortal: true }}
                   />
                 </Table.Td>
                 <Table.Td>
                   <Group justify="flex-end">
-                  <ActionIcon color="red" variant="subtle" onClick={() => onDelete(l.id)} title="Delete">
+                    <ActionIcon color="red" variant="subtle" onClick={() => onDelete(l.id)} title="Delete">
                       <IconTrash size={16} />
                     </ActionIcon>
                   </Group>
@@ -309,9 +309,9 @@ function LocationsPane({ locations, onAdd, onUpdate, onDelete, companyId }) {
           />
 
           <Group justify="flex-end">
-          <Button onClick={async () => { await onAdd(draft); setAddOpen(false); setDraft({ name: "", timezone: "America/Los_Angeles", company_id: companyId }); }}>
-            Add
-          </Button>
+            <Button onClick={async () => { await onAdd(draft); setAddOpen(false); setDraft({ name: "", timezone: "America/Los_Angeles", company_id: companyId }); }}>
+              Add
+            </Button>
           </Group>
         </Stack>
       </Modal>
@@ -320,79 +320,80 @@ function LocationsPane({ locations, onAdd, onUpdate, onDelete, companyId }) {
 }
 
 function UsersPane({ companyId, users, locations, onInvite, onUpdate, onDelete }) {
-  const [invite, setInvite] = useState({
+  const [addOpen, setAddOpen] = useState(false);
+  const [draft, setDraft] = useState({
     email: "",
     display_name: "",
     role: "Employee",
-    location: locations[0]?.id || null, // single FK
+    // If your DB column is "location_id", rename this field and the two noted update spots below.
+    location: locations[0]?.id || null,
     is_active: true,
     pin: null,
   });
 
+  const roleOptions = ["Admin", "Manager", "Employee"];
+  const locationOptions = locations.map((l) => ({ value: l.id, label: l.name }));
+
+  function resetDraft() {
+    setDraft({
+      email: "",
+      display_name: "",
+      role: "Employee",
+      location: locations[0]?.id || null,
+      is_active: true,
+      pin: null,
+    });
+  }
+
   return (
     <Card withBorder radius="md">
-      <Text fw={700} mb="sm">Users & Roles</Text>
-      <Stack gap="sm">
-        <Group grow wrap="wrap">
-          <TextInput
-            label="Name"
-            placeholder="John Doe"
-            value={invite.display_name}
-            onChange={(e) => setInvite({ ...invite, display_name: e.target.value })}
-          />
-          <TextInput
-            label="Email"
-            placeholder="person@company.com"
-            value={invite.email}
-            onChange={(e) => setInvite({ ...invite, email: e.target.value })}
-          />
-          <Select
-            label="Role"
-            value={invite.role}
-            onChange={(v) => setInvite({ ...invite, role: v })}
-            data={["Admin", "Manager", "Employee"]}
-            comboboxProps={{ withinPortal: true }}
-          />
-        </Group>
-        <Select
-          label="Assign to location"
-          data={locations.map((l) => ({ value: l.id, label: l.name }))}
-          value={invite.location}
-          onChange={(v) => setInvite({ ...invite, location: v })}
-          comboboxProps={{ withinPortal: true }}
-        />
-        <Group justify="flex-end">
-          <Button leftSection={<IconPlus size={16} />} onClick={() => invite.email && onInvite(invite)}>Invite</Button>
-        </Group>
-      </Stack>
+      <Group justify="space-between" mb="sm" wrap="nowrap">
+        <Text fw={700}>Users & Roles</Text>
+        <Button leftSection={<IconPlus size={16} />} onClick={() => setAddOpen(true)}>
+          Add user
+        </Button>
+      </Group>
 
-      <Divider my="md" />
-
-      <ScrollArea.Autosize mah={360} type="auto" scrollbarSize={8} styles={{ viewport: { overflowX: "hidden" } }}>
+      <ScrollArea.Autosize
+        mah={360}
+        type="auto"
+        scrollbarSize={8}
+        styles={{ viewport: { overflowX: "hidden" } }}
+      >
         <Table highlightOnHover style={{ tableLayout: "fixed", width: "100%" }}>
-          <colgroup>
-            <col style={{ width: "36%" }} />
-            <col style={{ width: "18%" }} />
-            <col style={{ width: "36%" }} />
-            <col style={{ width: "10%" }} />
-          </colgroup>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Email</Table.Th>
-              <Table.Th>Role</Table.Th>
-              <Table.Th>Location</Table.Th>
-              <Table.Th></Table.Th>
+              <Table.Th style={{ width: "24%" }}>Name</Table.Th>
+              <Table.Th style={{ width: "26%" }}>Email</Table.Th>
+              <Table.Th style={{ width: "16%" }}>Role</Table.Th>
+              <Table.Th style={{ width: "24%" }}>Location</Table.Th>
+              <Table.Th style={{ width: "6%" }}>Active</Table.Th>
+              <Table.Th style={{ width: "4%" }} />
             </Table.Tr>
           </Table.Thead>
+
           <Table.Tbody>
             {users.map((u) => (
               <Table.Tr key={u.id}>
-                <Table.Td style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{u.email}</Table.Td>
+                <Table.Td>
+                  <TextInput
+                    value={u.display_name ?? ""}
+                    onChange={(e) => onUpdate(u.id, { display_name: e.currentTarget.value })}
+                    w="100%"
+                  />
+                </Table.Td>
+                <Table.Td>
+                  <TextInput
+                    value={u.email ?? ""}
+                    onChange={(e) => onUpdate(u.id, { email: e.currentTarget.value })}
+                    w="100%"
+                  />
+                </Table.Td>
                 <Table.Td>
                   <Select
-                    value={u.role}
-                    onChange={async (v) => onUpdate(u.id, { role: v })}
+                    value={u.role ?? "Employee"}
                     data={["Admin", "Manager", "Employee"]}
+                    onChange={(v) => onUpdate(u.id, { role: v })}
                     w="100%"
                     comboboxProps={{ withinPortal: true }}
                   />
@@ -400,15 +401,27 @@ function UsersPane({ companyId, users, locations, onInvite, onUpdate, onDelete }
                 <Table.Td>
                   <Select
                     data={locations.map((l) => ({ value: l.id, label: l.name }))}
-                    value={u.location}
-                    onChange={async (v) => onUpdate(u.id, { location: v })}
+                    value={u.location ?? null}     // or u.location_id if that's your column
+                    onChange={(v) => onUpdate(u.id, { location: v })} // or location_id: v
                     w="100%"
                     comboboxProps={{ withinPortal: true }}
                   />
                 </Table.Td>
                 <Table.Td>
+                  <Switch
+                    checked={u.is_active !== false}
+                    onChange={(e) => onUpdate(u.id, { is_active: e.currentTarget.checked })}
+                    aria-label="Active"
+                  />
+                </Table.Td>
+                <Table.Td>
                   <Group justify="flex-end">
-                    <ActionIcon color="red" variant="subtle" onClick={() => onDelete(u.id)} title="Remove">
+                    <ActionIcon
+                      color="red"
+                      variant="subtle"
+                      onClick={() => onDelete(u.id)}
+                      title="Remove"
+                    >
                       <IconTrash size={16} />
                     </ActionIcon>
                   </Group>
@@ -417,10 +430,70 @@ function UsersPane({ companyId, users, locations, onInvite, onUpdate, onDelete }
             ))}
           </Table.Tbody>
         </Table>
+
       </ScrollArea.Autosize>
+
+      {/* Add user modal (mirrors Locations "Add") */}
+      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add user" centered>
+        <Stack gap="sm">
+          <Group grow wrap="wrap">
+            <TextInput
+              label="Name"
+              placeholder="John Doe"
+              value={draft.display_name}
+              onChange={(e) => setDraft({ ...draft, display_name: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Email"
+              placeholder="person@company.com"
+              value={draft.email}
+              onChange={(e) => setDraft({ ...draft, email: e.currentTarget.value })}
+            />
+          </Group>
+
+          <Group grow wrap="nowrap">
+            <Select
+              label="Role"
+              value={draft.role}
+              onChange={(v) => setDraft({ ...draft, role: v })}
+              data={roleOptions}
+              comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+            />
+            <Select
+              label="Assign to location"
+              data={locationOptions}
+              // If your column is "location_id", rename field here and in create call.
+              value={draft.location}
+              onChange={(v) => setDraft({ ...draft, location: v })}
+              comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+            />
+          </Group>
+
+          <Switch
+            label="Active"
+            checked={draft.is_active}
+            onChange={(e) => setDraft({ ...draft, is_active: e.currentTarget.checked })}
+          />
+
+          <Group justify="flex-end" mt="xs">
+            <Button
+              onClick={async () => {
+                if (!draft.email.trim()) return alert("Email is required.");
+                await onInvite(draft); // parent already adds company_id and refreshes
+                resetDraft();
+                setAddOpen(false);
+              }}
+              leftSection={<IconPlus size={16} />}
+            >
+              Add
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Card>
   );
 }
+
 
 function PoliciesPane({ settings, setSettings, onSave }) {
   const p = settings.policies;
