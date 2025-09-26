@@ -17,7 +17,7 @@ import {
   listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
 } from "./queries.js";
 
-export default function AdminView({ onAfterLocationsChange }) {
+export default function AdminView({ refreshHeaderData }) {
   const { settings, updateSettings } = useSettings();
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
@@ -129,34 +129,35 @@ export default function AdminView({ onAfterLocationsChange }) {
             <LocationsPane
               locations={locations}
               companyId={companyId}
-              onAdd={async (row) => { await createLocation(row); await refreshLocations(); onAfterLocationsChange?.(); }}
+              onAdd={async (row) => { await createLocation(row); await refreshLocations(); refreshHeaderData?.(); }}
               onUpdate={async (id, patch) => {
                 // optimistic
                 setLocations(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
                 await updateLocation(id, patch);
-                onAfterLocationsChange?.();
+                refreshHeaderData?.();
               }}
               onDelete={async (id) => {
                 setLocations(prev => prev.filter(l => l.id !== id));
                 await deleteLocation(id); await refreshLocations();
-                onAfterLocationsChange?.();
+                refreshHeaderData?.();
               }}
             />
           )}
-
           {view === "users" && (
             <UsersPane
               companyId={companyId}
               users={users}
               locations={locations}
-              onInvite={async (row) => { await createUser({ ...row, company_id: companyId }); await refreshUsers(); }}
+              onInvite={async (row) => { await createUser({ ...row, company_id: companyId }); await refreshUsers(); refreshHeaderData?.(); }}
               onUpdate={async (id, patch) => {
                 setUsers(prev => prev.map(u => u.id === id ? { ...u, ...patch } : u));
                 await updateUser(id, patch);
+                refreshHeaderData?.()
               }}
               onDelete={async (id) => {
                 setUsers(prev => prev.filter(u => u.id !== id));
                 await deleteUser(id);
+                refreshHeaderData?.();
               }}
             />
           )}

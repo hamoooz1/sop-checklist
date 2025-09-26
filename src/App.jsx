@@ -975,12 +975,12 @@ const baseTheme = createTheme({
 
 function AppInner() {
   const { settings, updateSettings } = useSettings();
-  const [employees, setEmployees] = useState([]);
-  const [currentEmployee, setCurrentEmployee] = useState("");
   const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb";
   const [mode, setMode] = useState("employee");
-  const [locations, setLocations] = useState([]);
   const [activeLocationId, setActiveLocationId] = useState("");
+  const [locations, setLocations] = useState([]);
+  const [currentEmployee, setCurrentEmployee] = useState("");
+  const [employees, setEmployees] = useState([]);
 
   // load once on mount
   const refreshHeaderData = React.useCallback(async () => {
@@ -1057,6 +1057,19 @@ function AppInner() {
       setActiveLocationId(locations[0]?.id ? String(locations[0].id) : "");
     }
   }, [locations, activeLocationId]);
+
+  useEffect(() => {
+    if (!locations.find((l) => String(l.id) === String(activeLocationId))) {
+      setActiveLocationId(locations[0]?.id ? String(locations[0].id) : "");
+    }
+  }, [locations, activeLocationId]);
+
+  // Keep currentEmployee valid when Admin edits Users
+  useEffect(() => {
+    if (!employees.find((u) => String(u.id) === String(currentEmployee))) {
+      setCurrentEmployee(employees[0]?.id ? String(employees[0].id) : "");
+    }
+  }, [employees, currentEmployee]);
 
   // Today’s tasklists (from admin templates + ad-hoc)
   const tasklistsToday = useMemo(() => {
@@ -1317,12 +1330,11 @@ function AppInner() {
               />
               <Select
                 value={currentEmployee}
-                onChange={setCurrentEmployee}
-                data={employeeOptions}
+                onChange={(u) => setCurrentEmployee(u)}
+                data={employees.map((l) => ({ value: String(l.id), label: l.display_name }))}
                 w={220}
                 placeholder="Select employee"
               />
-
               <Select
                 value={activeLocationId}
                 onChange={(v) => setActiveLocationId(v)}
@@ -1368,7 +1380,7 @@ function AppInner() {
                   submissions={submissions}
                   onBrandColorChange={() => { }}
                   locations={locations}
-                  onAfterLocationsChange={refreshHeaderData}
+                  refreshHeaderData={refreshHeaderData}
                 />
               </div>
             )}
