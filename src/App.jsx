@@ -28,7 +28,7 @@ import {
 } from "@mantine/core";
 
 import { useMediaQuery } from "@mantine/hooks";
-
+import { supabase } from "./lib/supabase.js";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
@@ -36,7 +36,7 @@ import {
 import { useLocalStorage } from "@mantine/hooks";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
 import { SettingsProvider, useSettings } from "./settings-store.jsx";
-import fetchUsers, { fetchLocations } from "./queries.js";
+import fetchUsers, { fetchLocations, getCompany } from "./queries.js";
 
 /** ---------------------- Mock Data ---------------------- */
 const TIME_BLOCKS = [
@@ -974,27 +974,62 @@ const baseTheme = createTheme({
 });
 
 function AppInner() {
-  const { settings } = useSettings();
+  const { settings, updateSettings } = useSettings();
   const [employees, setEmployees] = useState([]);
   const [currentEmployee, setCurrentEmployee] = useState("");
+  const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb";
+  const [mode, setMode] = useState("employee");
+  const [locations, setLocations] = useState([]);
+  const [activeLocationId, setActiveLocationId] = useState("");
 
   // load once on mount
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const [users, locs] = await Promise.all([fetchUsers(), fetchLocations()]);
-        if (!alive) return;
-        setEmployees(users);
-        setLocations(locs);
-        if (users.length) setCurrentEmployee(String(users[0].id));
-        if (locs.length) setActiveLocationId(String(locs[0].id));
-      } catch (e) {
-        console.error(e);
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
+  const refreshHeaderData = React.useCallback(async () => {
+       const [users, locs] = await Promise.all([fetchUsers(), fetchLocations()]);
+       setEmployees(users);
+       setLocations(locs);
+       // keep selections valid
+       setCurrentEmployee((cur) => users.find(u => String(u.id) === String(cur)) ? cur : (users[0] ? String(users[0].id) : ""));
+       setActiveLocationId((cur) => locs.find(l => String(l.id) === String(cur)) ? cur : (locs[0] ? String(locs[0].id) : ""));
+     }, []);
+    
+     const refreshCompanySettings = React.useCallback(async () => {
+       const c = await getCompany(companyId);
+       updateSettings(prev => ({
+         ...prev,
+         company: {
+           ...prev.company,
+           id: c.id,
+           name: c.name,
+           brandColor: c.brand_color || prev.company.brandColor,
+           timezone: c.timezone || prev.company.timezone,
+           // if you store logo in DB, map it here:
+           logo: c.logo ?? prev.company.logo
+         }
+       }));
+     }, [companyId, updateSettings]);
+    
+     // initial load
+     useEffect(() => { refreshHeaderData(); }, [refreshHeaderData]);
+    
+     // live updates when Admin creates/edits/deletes
+     useEffect(() => {
+       const ch = supabase
+         .channel("header-sync")
+         .on("postgres_changes",
+           { event: "*", schema: "public", table: "location", filter: `company_id=eq.${companyId}` },
+           () => { refreshHeaderData(); }
+         )
+         .on("postgres_changes",
+           { event: "*", schema: "public", table: "app_user", filter: `company_id=eq.${companyId}` },
+           () => { refreshHeaderData(); }
+         )
+         .on("postgres_changes",
+           { event: "UPDATE", schema: "public", table: "company", filter: `id=eq.${companyId}` },
+           () => { refreshCompanySettings(); }
+         )
+         .subscribe();
+       return () => { supabase.removeChannel(ch); };
+     }, [companyId, refreshHeaderData, refreshCompanySettings]);
 
   // build Mantine <Select/> options
   const employeeOptions = useMemo(() => {
@@ -1015,11 +1050,6 @@ function AppInner() {
     key: "theme",
     defaultValue: "light",
   });
-
-
-  const [mode, setMode] = useState("employee");
-  const [locations, setLocations] = useState([]);
-  const [activeLocationId, setActiveLocationId] = useState("");
 
   // Keep activeLocation valid when Admin edits locations
   useEffect(() => {
@@ -1338,6 +1368,7 @@ function AppInner() {
                   submissions={submissions}
                   onBrandColorChange={() => { }}
                   locations={locations}
+                  onAfterLocationsChange={refreshHeaderData}
                 />
               </div>
             )}

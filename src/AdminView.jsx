@@ -17,7 +17,7 @@ import {
   listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
 } from "./queries.js";
 
-export default function AdminView() {
+export default function AdminView({ onAfterLocationsChange }) {
   const { settings, updateSettings } = useSettings();
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
@@ -129,15 +129,17 @@ export default function AdminView() {
             <LocationsPane
               locations={locations}
               companyId={companyId}
-              onAdd={async (row) => { await createLocation(row); await refreshLocations(); }}
+              onAdd={async (row) => { await createLocation(row); await refreshLocations(); onAfterLocationsChange?.();}}
               onUpdate={async (id, patch) => {
                 // optimistic
                 setLocations(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
                 await updateLocation(id, patch);
+                onAfterLocationsChange?.();
               }}
               onDelete={async (id) => {
                 setLocations(prev => prev.filter(l => l.id !== id));
                 await deleteLocation(id); await refreshLocations();
+                onAfterLocationsChange?.();
               }}
             />
           )}
