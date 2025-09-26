@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Card, Stack, Group, Text, Button, TextInput, ColorInput, Select, MultiSelect,
   NumberInput, Switch, FileButton, Badge, Table, ScrollArea, Divider,
   NavLink, Grid, Modal, ActionIcon, rem
 } from "@mantine/core";
+
+import { supabase } from "./lib/supabase.js";
+
 import { IconUpload, IconDeviceFloppy, IconTrash, IconPlus, IconSettings } from "@tabler/icons-react";
 import { useSettings } from "./settings-store.jsx";
 import {
@@ -18,57 +21,68 @@ export default function AdminView() {
   const { settings, updateSettings } = useSettings();
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
-  const [view, setView] = useState("company");
-  const [draft, setDraft] = useState(settings);
-  const [locations, setLocations] = useState([]);
   
   const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb"; // make sure this is set in your SettingsProvider init
 
-  useEffect(() => {
-  let isMounted = true;
-  (async () => {
-    try {
-      const rows = await listLocations();
-      if (isMounted) setLocations(Array.isArray(rows) ? rows : []);
-    } catch (e) {
-      console.error(e);
-      if (isMounted) setLocations([]);
-    }
-  })();
-  return () => { isMounted = false; };
-}, []);
+  const [view, setView] = useState("company");
+  const [draft, setDraft] = useState({
+    company: { name: "", brandColor: "#0ea5e9", timezone: "UTC", weekStart: "Mon", locale: "en-US", logo: null },
+    policies: { photoRetentionDays: 90, requireNoteForFoodSafety: true },
+    notifications: { dailyDigest: true, reworkAlerts: true, overdueAlerts: true },
+    security: { pinLength: 4, pinExpiryDays: 180, lockoutThreshold: 5, dualSignoff: false },
+    theme: { defaultScheme: "auto", accent: "#0ea5e9" },
+    checklists: { timeBlocks: [], templates: [], overrides: [] },
+    locations: []
+  });
 
-  const [company, setCompany] = useState(null);
+  const [locations, setLocations] = useState([]);
   const [users, setUsers] = useState([]);
-  const [timeBlocks, setTimeBlocks] = useState([]);
-  const [templates, setTemplates] = useState([]);
 
-  useEffect(() => setDraft(settings), [settings]);
-  useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      try {
-        const rows = await listUsers(companyId);
-        if (isMounted) setUsers(Array.isArray(rows) ? rows : []);
-      } catch (e) {
-        console.error(e);
-        if (isMounted) setUsers([]);
-      }
-    })();
-    return () => { isMounted = false; };
+   // ------- Refreshers
+   const refreshLocations = useCallback(async () => {
+    const rows = await listLocations();
+    setLocations(Array.isArray(rows) ? rows : []);
+  }, []);
+
+  const refreshUsers = useCallback(async () => {
+    const rows = await listUsers(companyId);
+    setUsers(Array.isArray(rows) ? rows : []);
   }, [companyId]);
 
+  // Initial fetch
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      await Promise.all([refreshLocations(), refreshUsers()]);
+      // hydrate non-list stuff if you want:
+      const all = await hydrateAll(companyId);
+      alive && setDraft(prev => ({ ...prev, ...all }));
+    })();
+    return () => { alive = false; };
+  }, [refreshLocations, refreshUsers, companyId]);
+
+  // ------- Realtime subscriptions (auto-update on external changes)
+  useEffect(() => {
+    const ch = supabase
+      .channel("admin-sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "location" }, async () => { await refreshLocations(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_user", filter: `company_id=eq.${companyId}` }, async () => { await refreshUsers(); })
+      .subscribe();
+
+    return () => { supabase.removeChannel(ch); };
+  }, [companyId, refreshLocations, refreshUsers]);
+
+  // ------- Company save
   const saveDraftToApp = async () => {
     await updateCompany(companyId, {
       name: draft.company.name,
       brand_color: draft.company.brandColor,
       timezone: draft.company.timezone,
     });
-    // Reload to keep UI in sync with DB truth
-    const fresh = await hydrateSettings(companyId);
-    updateSettings(fresh);
-    alert("Settings saved");
-  }
+    // If you store company in local state, patch it optimistically; or re-hydrate:
+    const all = await hydrateAll(companyId);
+    setDraft(prev => ({ ...prev, ...all }));
+  };
 
   return (
     <div
@@ -107,17 +121,43 @@ export default function AdminView() {
         style={{ minWidth: 0 }}
       >
         <div style={{ minWidth: 0 }}>
-          {view === "company" && <CompanyPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "locations" && <LocationsPane locations={locations} settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "users" && <UsersPane
-            companyId={companyId}
-            users={users}
-            locations={locations}
-            onInvite={async (row) => { await createUser({ ...row, company_id: companyId }); }}
-            onUpdate={async (id, patch) => { await updateUser(id, patch); }}
-            onDelete={async (id) => { await deleteUser(id); }}
-          />
-          }
+        {view === "company" && (
+            <CompanyPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />
+          )}
+
+          {view === "locations" && (
+            <LocationsPane
+              locations={locations}
+              companyId={companyId}
+              onAdd={async (row) => { await createLocation(row); await refreshLocations(); }}
+              onUpdate={async (id, patch) => {
+                // optimistic
+                setLocations(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+                await updateLocation(id, patch);
+              }}
+              onDelete={async (id) => {
+                setLocations(prev => prev.filter(l => l.id !== id));
+                await deleteLocation(id); await refreshLocations();
+              }}
+            />
+          )}
+
+          {view === "users" && (
+            <UsersPane
+              companyId={companyId}
+              users={users}
+              locations={locations}
+              onInvite={async (row) => { await createUser({ ...row, company_id: companyId }); await refreshUsers(); }}
+              onUpdate={async (id, patch) => {
+                setUsers(prev => prev.map(u => u.id === id ? { ...u, ...patch } : u));
+                await updateUser(id, patch);
+              }}
+              onDelete={async (id) => {
+                setUsers(prev => prev.filter(u => u.id !== id));
+                await deleteUser(id);
+              }}
+            />
+          )}
           {view === "policies" && <PoliciesPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "notifications" && <NotificationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "security" && <SecurityPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
@@ -202,30 +242,9 @@ function CompanyPane({ settings, setSettings, onSave }) {
   );
 }
 
-function LocationsPane({ settings, setSettings, onSave, locations }) {
+function LocationsPane({ locations, onAdd, onUpdate, onDelete, companyId }) {
   const [addOpen, setAddOpen] = useState(false);
-  const [draft, setDraft] = useState({ name: "", timezone: "America/Los_Angeles" });
-  const [locationList, setLocationsList] = useState([]);
-
-  const refreshLocations = async () => {
-    const locs = await listLocations();
-    setSettings({ ...settings, locations: locs });
-  };
-
-  const addLocation = async (newLoc) => {
-    await createLocation(newLoc);
-    await refreshLocations();
-  };
-
-  const onInlineEdit = async (id, patch) => {
-    await updateLocation(id, patch);
-    await refreshLocations();
-  };
-
-  const removeLocation = async (id) => {
-    await deleteLocation(id);
-    await refreshLocations();
-  };
+  const [draft, setDraft] = useState({ name: "", timezone: "America/Los_Angeles", company_id: companyId });
 
   return (
     <Card withBorder radius="md">
@@ -235,16 +254,7 @@ function LocationsPane({ settings, setSettings, onSave, locations }) {
       </Group>
 
       <ScrollArea.Autosize mah={360} type="auto" scrollbarSize={8} styles={{ viewport: { overflowX: "hidden" } }}>
-        <Table
-          highlightOnHover
-          withColumnBorders={false}
-          style={{ tableLayout: "fixed", width: "100%" }}
-        >
-          <colgroup>
-            <col style={{ width: "52%" }} />
-            <col style={{ width: "38%" }} />
-            <col style={{ width: "10%" }} />
-          </colgroup>
+        <Table highlightOnHover style={{ tableLayout: "fixed", width: "100%" }}>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Name</Table.Th>
@@ -258,33 +268,22 @@ function LocationsPane({ settings, setSettings, onSave, locations }) {
                 <Table.Td>
                   <TextInput
                     value={l.name}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        locations: settings.locations.map((x) => (x.id === l.id ? { ...x, name: e.target.value } : x)),
-                      })
-                    }
+                    onChange={(e) => onUpdate(l.id, { name: e.currentTarget.value })}
                     w="100%"
-                    miw={rem(160)}
                   />
                 </Table.Td>
                 <Table.Td>
                   <Select
                     value={l.timezone}
-                    onChange={(v) =>
-                      setSettings({
-                        ...settings,
-                        locations: settings.locations.map((x) => (x.id === l.id ? { ...x, timezone: v } : x)),
-                      })
-                    }
-                    data={["America/Los_Angeles", "America/Vancouver", "America/New_York", "UTC"]}
+                    onChange={(v) => onUpdate(l.id, { timezone: v })}
+                    data={["America/Los_Angeles","America/Vancouver","America/New_York","UTC"]}
                     w="100%"
                     comboboxProps={{ withinPortal: true }}
                   />
                 </Table.Td>
                 <Table.Td>
                   <Group justify="flex-end">
-                    <ActionIcon color="red" variant="subtle" onClick={() => removeLocation(l.id)} title="Delete">
+                  <ActionIcon color="red" variant="subtle" onClick={() => onDelete(l.id)} title="Delete">
                       <IconTrash size={16} />
                     </ActionIcon>
                   </Group>
@@ -295,9 +294,6 @@ function LocationsPane({ settings, setSettings, onSave, locations }) {
         </Table>
       </ScrollArea.Autosize>
 
-      <Group justify="flex-end" mt="sm">
-        <Button leftSection={<IconDeviceFloppy size={16} />} onClick={onSave}>Save</Button>
-      </Group>
 
       <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add location" centered>
         <Stack>
@@ -305,13 +301,15 @@ function LocationsPane({ settings, setSettings, onSave, locations }) {
           <Select
             label="Timezone"
             value={draft.timezone}
-            onChange={(v) => setDraft({ ...draft, timezone: v })}
             data={["America/Los_Angeles", "America/Vancouver", "America/New_York", "UTC"]}
+            onChange={(v) => setDraft({ ...draft, timezone: v })}
             comboboxProps={{ withinPortal: true, zIndex: 11000 }}
           />
 
           <Group justify="flex-end">
-            <Button onClick={addLocation}>Add</Button>
+          <Button onClick={async () => { await onAdd(draft); setAddOpen(false); setDraft({ name: "", timezone: "America/Los_Angeles", company_id: companyId }); }}>
+            Add
+          </Button>
           </Group>
         </Stack>
       </Modal>

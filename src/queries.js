@@ -20,7 +20,8 @@ const BUCKET = "evidence";
 export default async function fetchUsers() {
   const { data, error } = await supabase
     .from("app_user")
-    .select("*");
+    .select("*")
+    .eq("company_id", "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb");
   if (error) {
     throw new Error(`fetchUsers: ${error.message}`);
   } 
@@ -30,7 +31,8 @@ export default async function fetchUsers() {
 export async function fetchLocations() {
   const { data, error } = await supabase
     .from("location")
-    .select("*");
+    .select("*")
+    .eq("company_id", "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb");
   if (error) {
     throw new Error(`fetchLocations: ${error.message}`);
   } 
@@ -119,7 +121,7 @@ export async function updateCompany(companyId, { name, brand_color, timezone }) 
 // -----------------------------
 // Locations (no company_id in schema)
 // -----------------------------
-export async function listLocations() {
+export async function listLocations(companyId) {
   const { data, error } = await supabase
     .from("location")
     .select("*")
@@ -128,8 +130,8 @@ export async function listLocations() {
   return data;
 }
 
-export async function createLocation({ name, timezone }) {
-  const { error } = await supabase.from("location").insert([{ name, timezone }]);
+export async function createLocation({ name, timezone, company_id }) {
+  const { error } = await supabase.from("location").insert([{ name, timezone, company_id }]);
   if (error) throw error;
 }
 export async function updateLocation(id, patch) {
