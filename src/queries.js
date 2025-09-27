@@ -110,13 +110,27 @@ export async function getCompany(companyId) {
   return data;
 }
 
-export async function updateCompany(companyId, { name, brand_color, timezone }) {
+export async function uploadCompanyLogo(companyId, file) {
+  const safe = file.name.replace(/\s+/g, "_");
+  const path = `company/${companyId}/${Date.now()}_${safe}`;
+  const { data, error } = await supabase
+    .storage.from("branding")
+    .upload(path, file, { upsert: true, contentType: file.type });
+  if (error) throw error;
+  const { data: pub } = supabase.storage.from("branding").getPublicUrl(path);
+  return pub.publicUrl; // store in company.logo
+}
+
+
+export async function updateCompany(companyId, patch) {
+  // Accepts { name?, brand_color?, timezone?, logo? }
   const { error } = await supabase
     .from("company")
-    .update({ name, brand_color, timezone })
+    .update(patch)
     .eq("id", companyId);
   if (error) throw error;
 }
+
 
 // -----------------------------
 // Locations (no company_id in schema)

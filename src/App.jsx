@@ -1009,7 +1009,10 @@ function AppInner() {
      }, [companyId, updateSettings]);
     
      // initial load
-     useEffect(() => { refreshHeaderData(); }, [refreshHeaderData]);
+      useEffect(() => { 
+         refreshHeaderData(); 
+         refreshCompanySettings();   // <-- hydrate header (name/color/logo) from DB at startup
+      }, [refreshHeaderData, refreshCompanySettings]);
     
      // live updates when Admin creates/edits/deletes
      useEffect(() => {
@@ -1381,6 +1384,7 @@ function AppInner() {
                   onBrandColorChange={() => { }}
                   locations={locations}
                   refreshHeaderData={refreshHeaderData}
+                  refreshCompanySettings={refreshCompanySettings}  
                 />
               </div>
             )}

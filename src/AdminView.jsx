@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useMemo } from "react";
 import {
   Card, Stack, Group, Text, Button, TextInput, ColorInput, Select, MultiSelect,
   NumberInput, Switch, FileButton, Badge, Table, ScrollArea, Divider,
@@ -12,15 +12,13 @@ import { useSettings } from "./settings-store.jsx";
 import {
   hydrateAll, updateCompany,
   listLocations, createLocation, updateLocation, deleteLocation,
-  listUsers, createUser, updateUser, deleteUser,
+  listUsers, createUser, updateUser, deleteUser, uploadCompanyLogo,
   listTimeBlocks, upsertTimeBlock, removeTimeBlock,
   listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
 } from "./queries.js";
 
-export default function AdminView({ refreshHeaderData }) {
+export default function AdminView({ refreshHeaderData, refreshCompanySettings }) {
   const { settings, updateSettings } = useSettings();
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState(null);
 
   const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb"; // make sure this is set in your SettingsProvider init
 
@@ -37,6 +35,7 @@ export default function AdminView({ refreshHeaderData }) {
 
   const [locations, setLocations] = useState([]);
   const [users, setUsers] = useState([]);
+  const [company, setCompany] = useState("");
 
   // ------- Refreshers
   const refreshLocations = useCallback(async () => {
@@ -48,6 +47,11 @@ export default function AdminView({ refreshHeaderData }) {
     const rows = await listUsers(companyId);
     setUsers(Array.isArray(rows) ? rows : []);
   }, [companyId]);
+
+  const refreshCompany = useCallback(async () => {
+    const rows = await getCompany(companyId);
+    setCompany(rows.id || "");
+  }, []);
 
   // Initial fetch
   useEffect(() => {
@@ -83,6 +87,18 @@ export default function AdminView({ refreshHeaderData }) {
     const all = await hydrateAll(companyId);
     setDraft(prev => ({ ...prev, ...all }));
   };
+
+  useEffect(() => {
+    refreshHeaderData();        // users/locations
+    // refreshCompanySettings();   // <-- get company name/color/timezone on first load
+  }, [refreshHeaderData]);
+
+  const toUiCompanyPatch = (dbPatch) => ({
+    ...(dbPatch.name !== undefined ? { name: dbPatch.name } : {}),
+    ...(dbPatch.brand_color !== undefined ? { brandColor: dbPatch.brand_color } : {}),
+    ...(dbPatch.timezone !== undefined ? { timezone: dbPatch.timezone } : {}),
+    ...(dbPatch.logo !== undefined ? { logo: dbPatch.logo } : {}),
+  });
 
   return (
     <div
@@ -122,7 +138,40 @@ export default function AdminView({ refreshHeaderData }) {
       >
         <div style={{ minWidth: 0 }}>
           {view === "company" && (
-            <CompanyPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />
+            <CompanyPane
+              companyId={companyId}
+              initial={useMemo(() => ({
+                name: draft.company.name,
+                brandColor: draft.company.brandColor,
+                timezone: draft.company.timezone,
+                weekStart: draft.company.weekStart,
+                locale: draft.company.locale,
+                logo: draft.company.logo,
+              }), [
+                draft.company.name,
+                draft.company.brandColor,
+                draft.company.timezone,
+                draft.company.weekStart,
+                draft.company.locale,
+                draft.company.logo,
+              ])}
+              onUpdate={async (id, patch) => {
+                await updateCompany(id, patch);     // persist to DB
+                refreshHeaderData?.();              // header picks up latest users/locations
+                setDraft(prev => ({
+                  ...prev,
+                  company: {
+                    ...prev.company,
+                    name: patch.name ?? prev.company.name,
+                    brandColor: patch.brand_color ?? prev.company.brandColor,
+                    timezone: patch.timezone ?? prev.company.timezone,
+                    logo: patch.logo ?? prev.company.logo,
+                  }
+                }));
+                refreshCompanySettings?.(); // instant header update from DB
+                refreshHeaderData?.();      // users/locations (unchanged, but fine)
+              }}
+            />
           )}
 
           {view === "locations" && (
@@ -183,67 +232,103 @@ export default function AdminView({ refreshHeaderData }) {
 
 /* ---------- PANES ---------- */
 
-function CompanyPane({ settings, setSettings, onSave }) {
-  const s = settings.company;
+// AdminView.jsx (replace your CompanyPane with this)
+function CompanyPane({ companyId, initial, onUpdate }) {
+  const [form, setForm] = useState(() => ({
+    name: initial?.name || "",
+    brandColor: initial?.brandColor || "#0ea5e9",
+    timezone: initial?.timezone || "UTC",
+    weekStart: initial?.weekStart || "Mon",
+    locale: initial?.locale || "en-US",
+    logo: initial?.logo || null,
+  }));
+
+  // keep local form in sync only when values truly change
+  useEffect(() => {
+    setForm(f => {
+      const next = {
+        name: initial?.name || "",
+        brandColor: initial?.brandColor || "#0ea5e9",
+        timezone: initial?.timezone || "UTC",
+        weekStart: initial?.weekStart || "Mon",
+        locale: initial?.locale || "en-US",
+        logo: initial?.logo || null,
+      };
+      const changed =
+        f.name !== next.name ||
+        f.brandColor !== next.brandColor ||
+        f.timezone !== next.timezone ||
+        f.weekStart !== next.weekStart ||
+        f.locale !== next.locale ||
+        f.logo !== next.logo;
+      return changed ? next : f;
+    });
+  }, [initial]);
+
+  const [uploading, setUploading] = useState(false);
+
+  const save = async () => {
+    await onUpdate(companyId, {
+      name: form.name,
+      brand_color: form.brandColor,
+      timezone: form.timezone,
+      logo: form.logo ?? null,
+    });
+  };
+
   return (
     <Card withBorder radius="md">
       <Text fw={700} mb="sm">Company</Text>
       <Stack gap="sm">
-        <TextInput label="Company name" value={s.name} onChange={(e) => setSettings({ ...settings, company: { ...s, name: e.target.value } })} />
-        <ColorInput label="Brand color" value={s.brandColor} onChange={(v) => setSettings({ ...settings, company: { ...s, brandColor: v } })} />
-        <Select
-          label="Timezone"
-          value={s.timezone}
-          onChange={(v) => setSettings({ ...settings, company: { ...s, timezone: v } })}
-          data={["America/Los_Angeles", "America/Vancouver", "America/New_York", "UTC"]}
-          comboboxProps={{ withinPortal: true }}
-        />
-        <Group grow wrap="nowrap">
-          <Select
-            label="Week starts on"
-            value={s.weekStart}
-            onChange={(v) => setSettings({ ...settings, company: { ...s, weekStart: v } })}
-            data={["Mon", "Sun"]}
-            comboboxProps={{ withinPortal: true }}
-          />
-          <Select
-            label="Locale"
-            value={s.locale}
-            onChange={(v) => setSettings({ ...settings, company: { ...s, locale: v } })}
-            data={["en-US", "en-CA", "fr-CA"]}
-            comboboxProps={{ withinPortal: true }}
-          />
-        </Group>
-        <Group wrap="wrap">
+        <Group align="center" gap="md">
+          {form.logo ? (
+            <img src={form.logo} alt="Logo" style={{ width: 48, height: 48, borderRadius: 8, objectFit: "cover" }} />
+          ) : (
+            <div style={{ width: 48, height: 48, borderRadius: 8, background: form.brandColor }} />
+          )}
           <FileButton
             onChange={async (file) => {
               if (!file) return;
-              const dataUrl = await new Promise((res, rej) => {
-                const r = new FileReader();
-                r.onload = () => res(r.result);
-                r.onerror = rej;
-                r.readAsDataURL(file);
-              });
-              setSettings({ ...settings, company: { ...s, logo: dataUrl } });
+              try {
+                setUploading(true);
+                const url = await uploadCompanyLogo(companyId, file);
+                setForm(f => ({ ...f, logo: url }));
+              } finally {
+                setUploading(false);
+              }
             }}
             accept="image/*"
           >
-            {(props) => (
-              <Button leftSection={<IconUpload size={16} />} variant="default" {...props}>
-                Upload logo
-              </Button>
-            )}
+            {(props) => <Button variant="default" leftSection={<IconUpload size={16} />} loading={uploading} {...props}>Upload logo</Button>}
           </FileButton>
-          {s.logo && <Badge variant="light">Logo selected</Badge>}
         </Group>
-        <Divider />
+
+        <TextInput
+          label="Company name"
+          value={form.name}
+          onChange={(e) => setForm((f) => ({ ...f, name: e.currentTarget.value }))}
+        />
+        <ColorInput
+          label="Brand color"
+          value={form.brandColor}
+          onChange={(v) => setForm((f) => ({ ...f, brandColor: v }))}
+        />
+        <Select
+          label="Timezone"
+          value={form.timezone}
+          data={["America/Los_Angeles", "America/Vancouver", "America/New_York", "UTC"]}
+          onChange={(v) => setForm((f) => ({ ...f, timezone: v }))}
+          comboboxProps={{ withinPortal: true }}
+        />
         <Group justify="flex-end">
-          <Button leftSection={<IconDeviceFloppy size={16} />} onClick={onSave}>Save</Button>
+          <Button leftSection={<IconDeviceFloppy size={16} />} onClick={save} loading={uploading}>Save</Button>
         </Group>
       </Stack>
     </Card>
   );
 }
+
+
 
 function LocationsPane({ locations, onAdd, onUpdate, onDelete, companyId }) {
   const [addOpen, setAddOpen] = useState(false);
