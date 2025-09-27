@@ -20,7 +20,7 @@ import {
 export default function AdminView({ refreshHeaderData, refreshCompanySettings }) {
   const { settings, updateSettings } = useSettings();
 
-  const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb"; // make sure this is set in your SettingsProvider init
+  const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb";
 
   const [view, setView] = useState("company");
   const [draft, setDraft] = useState({
@@ -60,7 +60,20 @@ export default function AdminView({ refreshHeaderData, refreshCompanySettings })
       await Promise.all([refreshLocations(), refreshUsers()]);
       // hydrate non-list stuff if you want:
       const all = await hydrateAll(companyId);
-      alive && setDraft(prev => ({ ...prev, ...all }));
+      alive && setDraft(prev => ({
+        ...prev,
+        company: {
+          ...prev.company,
+          ...toUiCompany(all.company), // <- normalize brand_color -> brandColor
+        },
+        locations: all.locations ?? prev.locations,
+        users: all.users ?? prev.users,
+        checklists: {
+          ...prev.checklists,
+          timeBlocks: all.timeBlocks ?? prev.checklists.timeBlocks,
+          templates: all.templates ?? prev.checklists.templates,
+        },
+      }));
     })();
     return () => { alive = false; };
   }, [refreshLocations, refreshUsers, companyId]);
@@ -93,12 +106,32 @@ export default function AdminView({ refreshHeaderData, refreshCompanySettings })
     // refreshCompanySettings();   // <-- get company name/color/timezone on first load
   }, [refreshHeaderData]);
 
-  const toUiCompanyPatch = (dbPatch) => ({
-    ...(dbPatch.name !== undefined ? { name: dbPatch.name } : {}),
-    ...(dbPatch.brand_color !== undefined ? { brandColor: dbPatch.brand_color } : {}),
-    ...(dbPatch.timezone !== undefined ? { timezone: dbPatch.timezone } : {}),
-    ...(dbPatch.logo !== undefined ? { logo: dbPatch.logo } : {}),
+  // queries.js
+  const toUiCompany = (r) => ({
+    id: r.id,
+    name: r.name ?? "",
+    brandColor: r.brand_color ?? "#0ea5e9",
+    timezone: r.timezone ?? "UTC",
+    logo: r.logo ?? null,
   });
+
+  const companyInitial = useMemo(() => ({
+    name: draft.company.name,
+    brandColor: draft.company.brandColor ?? draft.company.brand_color ?? "#0ea5e9",
+    timezone: draft.company.timezone,
+    weekStart: draft.company.weekStart,
+    locale: draft.company.locale,
+    logo: draft.company.logo,
+  }), [
+    draft.company.name,
+    draft.company.brandColor,
+    draft.company.brand_color,
+    draft.company.timezone,
+    draft.company.weekStart,
+    draft.company.locale,
+    draft.company.logo,
+  ]);
+
 
   return (
     <div
@@ -140,21 +173,7 @@ export default function AdminView({ refreshHeaderData, refreshCompanySettings })
           {view === "company" && (
             <CompanyPane
               companyId={companyId}
-              initial={useMemo(() => ({
-                name: draft.company.name,
-                brandColor: draft.company.brandColor,
-                timezone: draft.company.timezone,
-                weekStart: draft.company.weekStart,
-                locale: draft.company.locale,
-                logo: draft.company.logo,
-              }), [
-                draft.company.name,
-                draft.company.brandColor,
-                draft.company.timezone,
-                draft.company.weekStart,
-                draft.company.locale,
-                draft.company.logo,
-              ])}
+              initial={companyInitial}
               onUpdate={async (id, patch) => {
                 await updateCompany(id, patch);     // persist to DB
                 refreshHeaderData?.();              // header picks up latest users/locations
