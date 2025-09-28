@@ -35,7 +35,6 @@ export default function AdminView({ refreshHeaderData, refreshCompanySettings })
 
   const [locations, setLocations] = useState([]);
   const [users, setUsers] = useState([]);
-  const [company, setCompany] = useState("");
 
   // ------- Refreshers
   const refreshLocations = useCallback(async () => {
@@ -233,13 +232,15 @@ export default function AdminView({ refreshHeaderData, refreshCompanySettings })
           {view === "notifications" && <NotificationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "security" && <SecurityPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "branding" && <BrandingPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "checklists" && <ChecklistsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "checklists" && <ChecklistsPane locations={locations} settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "data" && (
             <DataPane
               settings={draft}
               submissions={submissions}
               onImportSettings={(json) => setDraft(json)}
               onSeedDemo={settings?.__seedDemo}
+              locations={locations}
+              users={users}
             />
           )}
 
@@ -625,75 +626,8 @@ function PoliciesPane({ settings, setSettings, onSave }) {
   );
 }
 
-function NotificationsPane({ settings, setSettings, onSave }) {
-  const n = settings.notifications;
-  return (
-    <Card withBorder radius="md">
-      <Text fw={700} mb="sm">Notifications</Text>
-      <Stack>
-        <Switch label="Daily digest to managers" checked={n.dailyDigest}
-          onChange={(e) => setSettings({ ...settings, notifications: { ...n, dailyDigest: e.currentTarget.checked } })} />
-        <Switch label="Rework alerts" checked={n.reworkAlerts}
-          onChange={(e) => setSettings({ ...settings, notifications: { ...n, reworkAlerts: e.currentTarget.checked } })} />
-        <Switch label="Overdue checklist alerts" checked={n.overdueAlerts}
-          onChange={(e) => setSettings({ ...settings, notifications: { ...n, overdueAlerts: e.currentTarget.checked } })} />
-        <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
-      </Stack>
-    </Card>
-  );
-}
 
-function SecurityPane({ settings, setSettings, onSave }) {
-  const sec = settings.security;
-  return (
-    <Card withBorder radius="md">
-      <Text fw={700} mb="sm">Security & PIN</Text>
-      <Grid>
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <NumberInput label="PIN length" min={4} max={8} value={sec.pinLength}
-            onChange={(v) => setSettings({ ...settings, security: { ...sec, pinLength: Number(v) || 4 } })} />
-        </Grid.Col>
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <NumberInput label="PIN expiry (days)" min={0} max={3650} value={sec.pinExpiryDays}
-            onChange={(v) => setSettings({ ...settings, security: { ...sec, pinExpiryDays: Number(v) || 0 } })} />
-        </Grid.Col>
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <NumberInput label="Lockout after failed attempts" min={0} max={10} value={sec.lockoutThreshold}
-            onChange={(v) => setSettings({ ...settings, security: { ...sec, lockoutThreshold: Number(v) || 0 } })} />
-        </Grid.Col>
-      </Grid>
-      <Switch mt="sm" label="Two-person signoff (dual approval)" checked={sec.dualSignoff}
-        onChange={(e) => setSettings({ ...settings, security: { ...sec, dualSignoff: e.currentTarget.checked } })} />
-      <Group justify="flex-end" mt="md"><Button onClick={onSave}>Save</Button></Group>
-    </Card>
-  );
-}
-
-function BrandingPane({ settings, setSettings, onSave }) {
-  const t = settings.theme;
-  return (
-    <Card withBorder radius="md">
-      <Text fw={700} mb="sm">Branding & Theme</Text>
-      <Stack gap="sm">
-        <Select
-          label="Default color scheme"
-          value={t.defaultScheme}
-          onChange={(v) => setSettings({ ...settings, theme: { ...t, defaultScheme: v } })}
-          data={[
-            { value: "auto", label: "Auto" },
-            { value: "light", label: "Light" },
-            { value: "dark", label: "Dark" },
-          ]}
-          comboboxProps={{ withinPortal: true }}
-        />
-        <ColorInput label="Accent color" value={t.accent} onChange={(v) => setSettings({ ...settings, theme: { ...t, accent: v } })} />
-        <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
-      </Stack>
-    </Card>
-  );
-}
-
-function ChecklistsPane({ settings, setSettings, onSave }) {
+function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, locations }) {
   const stores = settings.checklists || { timeBlocks: [], templates: [], overrides: [] };
 
   // Local UI state
@@ -703,17 +637,42 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
   const [tplDraft, setTplDraft] = useState(initTemplateDraft());
   const [activeTplId, setActiveTplId] = useState(null);
 
+  const [timeBlocks, setTimeBlocks] = useState([]);
+  const [templates, setTemplates] = useState([]);
+
   const [tbOpen, setTbOpen] = useState(false);
   const [tbDraft, setTbDraft] = useState(initTimeBlockDraft());
 
   const [adhocOpen, setAdhocOpen] = useState(false);
-  const [adhocDraft, setAdhocDraft] = useState(initAdhocDraft(settings.locations?.[0]?.id));
+  const [adhocDraft, setAdhocDraft] = useState(initAdhocDraft(locations?.[0]?.id));
+
+  const isUUID = (v) =>
+    typeof v === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+
+  const genUuid = () =>
+  (globalThis.crypto?.randomUUID?.() ??
+    "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    }));
+
+  const load = useCallback(async () => {
+    const [tbs, tpls] = await Promise.all([listTimeBlocks(), listTasklistTemplates()]);
+    setTimeBlocks(tbs); setTemplates(tpls);
+    // keep Admin draft in sync ONLY for displaying lists in this pane (still not the source of truth)
+    setSettings(prev => ({ ...prev, checklists: { ...(prev.checklists || {}), timeBlocks: tbs, templates: tpls, overrides: prev.checklists?.overrides ?? [] } }));
+    onReloadChecklists?.();
+  }, [setSettings, onReloadChecklists]);
+
+  useEffect(() => { load(); }, [load]);
 
   function initTemplateDraft() {
     return {
-      id: makeId("tpl"),
+      id: undefined,
       name: "",
-      locationId: settings.locations?.[0]?.id || "",
+      locationId: locations?.[0]?.id || "",
       timeBlockId: stores.timeBlocks?.[0]?.id || "",
       recurrence: [0, 1, 2, 3, 4, 5, 6],
       tasks: []
@@ -738,40 +697,41 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
     return `${prefix}_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`;
   }
 
-  // Save helpers on settings
-  function upsertTemplate(tpl, mode) {
-    const exists = stores.templates.findIndex(t => t.id === tpl.id);
-    const next = { ...settings, checklists: { ...stores } };
-    if (exists >= 0 && mode !== "duplicate") {
-      next.checklists.templates = stores.templates.map(t => t.id === tpl.id ? tpl : t);
-    } else {
-      next.checklists.templates = [...stores.templates, { ...tpl, id: mode === "duplicate" ? makeId("tpl") : tpl.id }];
-    }
-    setSettings(next);
+  // Update and delete templates -------------
+  async function saveTemplateToDb(tplUi, mode) {
+    const isCreateOrDup = mode === "create" || mode === "duplicate" || !tplUi.id;
+    // Ensure every outgoing task has a real UUID for DB
+    const tasksOut = (tplUi.tasks || []).map((t) => {
+      const base = { ...t };
+      // For new templates/duplicates => always brand new task IDs
+      if (isCreateOrDup) {
+        base.id = genUuid();
+        return base;
+      }
+      // For updates => keep valid UUIDs, replace UI-only ids with a new UUID
+      base.id = isUUID(t.id) ? t.id : genUuid();
+      return base;
+    });
+
+    const payload = {
+      ...tplUi,
+      ...(isCreateOrDup ? { id: undefined } : {}),
+      tasks: tasksOut,
+    };
+    await upsertTasklistTemplateWithTasks(payload);
+    await load();
   }
 
-  function removeTemplate(id) {
-    const next = { ...settings, checklists: { ...stores, templates: stores.templates.filter(t => t.id !== id) } };
-    setSettings(next);
-    if (activeTplId === id) setActiveTplId(null);
-  }
+  async function removeTemplateDb(id) { await deleteTasklistTemplate(id); await load(); }
 
-  function upsertTimeBlock(tb) {
-    const exists = stores.timeBlocks.findIndex(t => t.id === tb.id);
-    const next = { ...settings, checklists: { ...stores } };
-    if (!tb.id.trim()) return;
-    if (exists >= 0) {
-      next.checklists.timeBlocks = stores.timeBlocks.map(t => t.id === tb.id ? tb : t);
-    } else {
-      next.checklists.timeBlocks = [...stores.timeBlocks, tb];
-    }
-    setSettings(next);
-  }
+  // ---------------------------------------------------
 
-  function removeTimeBlock(id) {
-    const next = { ...settings, checklists: { ...stores, timeBlocks: stores.timeBlocks.filter(t => t.id !== id) } };
-    setSettings(next);
-  }
+  // Update and delete time block --------------
+  async function saveTimeBlock(tb) { await upsertTimeBlock(tb); await load(); }
+
+  async function removeTimeBlockDb(id) { await removeTimeBlock(id); await load(); }
+
+  // -----------------------------------------------------
 
   function addTaskToDraftTemplate(taskDraft) {
     setTplDraft(prev => ({ ...prev, tasks: [...prev.tasks, { ...taskDraft, id: makeId("tt") }] }));
@@ -803,11 +763,11 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
     }
     setSettings(next);
     setAdhocOpen(false);
-    setAdhocDraft(initAdhocDraft(settings.locations?.[0]?.id));
+    setAdhocDraft(initAdhocDraft(locations?.[0]?.id));
   }
 
   const timeBlockOptions = stores.timeBlocks.map(tb => ({ value: tb.id, label: `${tb.name} (${tb.start}–${tb.end})` }));
-  const locationOptions = settings.locations.map(l => ({ value: l.id, label: l.name }));
+  const locationOptions = locations.map(l => ({ value: l.id, label: l.name }));
 
   return (
     <Card withBorder radius="md">
@@ -839,7 +799,7 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {stores.timeBlocks.map(tb => (
+              {timeBlocks.map(tb => (
                 <Table.Tr key={tb.id}>
                   <Table.Td><Badge variant="light">{tb.id}</Badge></Table.Td>
                   <Table.Td>{tb.name}</Table.Td>
@@ -848,7 +808,7 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
                   <Table.Td>
                     <Group justify="flex-end">
                       <Button size="xs" variant="default" onClick={() => { setTbDraft(tb); setTbOpen(true); }}>Edit</Button>
-                      <ActionIcon color="red" variant="subtle" onClick={() => removeTimeBlock(tb.id)} title="Delete"><IconTrash size={16} /></ActionIcon>
+                      <ActionIcon color="red" variant="subtle" onClick={() => removeTimeBlockDb(tb.id)} title="Delete"><IconTrash size={16} /></ActionIcon>
                     </Group>
                   </Table.Td>
                 </Table.Tr>
@@ -867,7 +827,7 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
                 <TextInput label="End (HH:MM)" value={tbDraft.end} onChange={(e) => setTbDraft({ ...tbDraft, end: e.target.value })} />
               </Group>
               <Group justify="flex-end">
-                <Button onClick={() => { upsertTimeBlock(tbDraft); setTbOpen(false); }}>Save</Button>
+                <Button onClick={() => { saveTimeBlock(tbDraft); setTbOpen(false); }}>Save</Button>
               </Group>
             </Stack>
           </Modal>
@@ -894,9 +854,9 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {stores.templates.map(tpl => {
+              {templates.map(tpl => {
                 const tb = stores.timeBlocks.find(x => x.id === tpl.timeBlockId);
-                const loc = settings.locations.find(l => l.id === tpl.locationId);
+                const loc = locations.find(l => l.id === tpl.locationId);
                 return (
                   <Table.Tr key={tpl.id}>
                     <Table.Td><Text fw={600}>{tpl.name}</Text></Table.Td>
@@ -907,8 +867,8 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
                     <Table.Td>
                       <Group justify="flex-end" gap="xs">
                         <Button size="xs" variant="default" onClick={() => { setActiveTplId(tpl.id); setTplDraft(tpl); setEditTplOpen(true); }}>Edit</Button>
-                        <Button size="xs" variant="default" onClick={() => upsertTemplate(tpl, "duplicate")}>Duplicate</Button>
-                        <ActionIcon color="red" variant="subtle" onClick={() => removeTemplate(tpl.id)} title="Delete"><IconTrash size={16} /></ActionIcon>
+                        <Button size="xs" variant="default" onClick={() => saveTemplateToDb(tpl, "duplicate")}>Duplicate</Button>
+                        <ActionIcon color="red" variant="subtle" onClick={() => removeTemplateDb(tpl.id)} title="Delete"><IconTrash size={16} /></ActionIcon>
                       </Group>
                     </Table.Td>
                   </Table.Tr>
@@ -957,7 +917,7 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
 
               <Group justify="flex-end">
                 <Button onClick={() => {
-                  upsertTemplate(tplDraft, createTplOpen ? "create" : "update");
+                  saveTemplateToDb(tplDraft, createTplOpen ? "create" : "update");
                   setCreateTplOpen(false);
                   setEditTplOpen(false);
                 }}>
@@ -973,7 +933,7 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
         <Stack>
           <Group justify="space-between" mb="xs">
             <Text fw={600}>Ad-hoc (one-off) tasks</Text>
-            <Button leftSection={<IconPlus size={16} />} onClick={() => { setAdhocDraft(initAdhocDraft(settings.locations?.[0]?.id)); setAdhocOpen(true); }}>
+            <Button leftSection={<IconPlus size={16} />} onClick={() => { setAdhocDraft(initAdhocDraft(locations?.[0]?.id)); setAdhocOpen(true); }}>
               Add ad-hoc
             </Button>
           </Group>
@@ -990,7 +950,7 @@ function ChecklistsPane({ settings, setSettings, onSave }) {
             <Table.Tbody>
               {stores.overrides.map(ovr => {
                 const tb = stores.timeBlocks.find(x => x.id === ovr.timeBlockId);
-                const loc = settings.locations.find(l => l.id === ovr.locationId);
+                const loc = locations.find(l => l.id === ovr.locationId);
                 return (
                   <Table.Tr key={ovr.id}>
                     <Table.Td>{ovr.date}</Table.Td>
@@ -1207,6 +1167,74 @@ function DataPane({ settings, submissions, onImportSettings, onSeedDemo }) {
         <Text c="dimmed" fz="sm">
           Use “Seed demo submissions” to generate realistic historical data for the Manager Dashboard/filters.
         </Text>
+      </Stack>
+    </Card>
+  );
+}
+
+function NotificationsPane({ settings, setSettings, onSave }) {
+  const n = settings.notifications;
+  return (
+    <Card withBorder radius="md">
+      <Text fw={700} mb="sm">Notifications</Text>
+      <Stack>
+        <Switch label="Daily digest to managers" checked={n.dailyDigest}
+          onChange={(e) => setSettings({ ...settings, notifications: { ...n, dailyDigest: e.currentTarget.checked } })} />
+        <Switch label="Rework alerts" checked={n.reworkAlerts}
+          onChange={(e) => setSettings({ ...settings, notifications: { ...n, reworkAlerts: e.currentTarget.checked } })} />
+        <Switch label="Overdue checklist alerts" checked={n.overdueAlerts}
+          onChange={(e) => setSettings({ ...settings, notifications: { ...n, overdueAlerts: e.currentTarget.checked } })} />
+        <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
+      </Stack>
+    </Card>
+  );
+}
+
+function SecurityPane({ settings, setSettings, onSave }) {
+  const sec = settings.security;
+  return (
+    <Card withBorder radius="md">
+      <Text fw={700} mb="sm">Security & PIN</Text>
+      <Grid>
+        <Grid.Col span={{ base: 12, md: 4 }}>
+          <NumberInput label="PIN length" min={4} max={8} value={sec.pinLength}
+            onChange={(v) => setSettings({ ...settings, security: { ...sec, pinLength: Number(v) || 4 } })} />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, md: 4 }}>
+          <NumberInput label="PIN expiry (days)" min={0} max={3650} value={sec.pinExpiryDays}
+            onChange={(v) => setSettings({ ...settings, security: { ...sec, pinExpiryDays: Number(v) || 0 } })} />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, md: 4 }}>
+          <NumberInput label="Lockout after failed attempts" min={0} max={10} value={sec.lockoutThreshold}
+            onChange={(v) => setSettings({ ...settings, security: { ...sec, lockoutThreshold: Number(v) || 0 } })} />
+        </Grid.Col>
+      </Grid>
+      <Switch mt="sm" label="Two-person signoff (dual approval)" checked={sec.dualSignoff}
+        onChange={(e) => setSettings({ ...settings, security: { ...sec, dualSignoff: e.currentTarget.checked } })} />
+      <Group justify="flex-end" mt="md"><Button onClick={onSave}>Save</Button></Group>
+    </Card>
+  );
+}
+
+function BrandingPane({ settings, setSettings, onSave }) {
+  const t = settings.theme;
+  return (
+    <Card withBorder radius="md">
+      <Text fw={700} mb="sm">Branding & Theme</Text>
+      <Stack gap="sm">
+        <Select
+          label="Default color scheme"
+          value={t.defaultScheme}
+          onChange={(v) => setSettings({ ...settings, theme: { ...t, defaultScheme: v } })}
+          data={[
+            { value: "auto", label: "Auto" },
+            { value: "light", label: "Light" },
+            { value: "dark", label: "Dark" },
+          ]}
+          comboboxProps={{ withinPortal: true }}
+        />
+        <ColorInput label="Accent color" value={t.accent} onChange={(v) => setSettings({ ...settings, theme: { ...t, accent: v } })} />
+        <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
       </Stack>
     </Card>
   );

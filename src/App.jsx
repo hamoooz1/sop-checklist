@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import AdminView from "./AdminView";
 import {
   MantineProvider,
@@ -27,7 +27,6 @@ import {
 
 } from "@mantine/core";
 
-import { useMediaQuery } from "@mantine/hooks";
 import { supabase } from "./lib/supabase.js";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -37,6 +36,7 @@ import { useLocalStorage } from "@mantine/hooks";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
 import { SettingsProvider, useSettings } from "./settings-store.jsx";
 import fetchUsers, { fetchLocations, getCompany } from "./queries.js";
+import { listTimeBlocks, listTasklistTemplates } from "./queries.js";
 
 /** ---------------------- Mock Data ---------------------- */
 const TIME_BLOCKS = [
@@ -78,10 +78,7 @@ const MOCK_TASKLISTS = [
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 /** ---------------------- Utils ---------------------- */
-function getTimeBlockLabel(id) {
-  const tb = TIME_BLOCKS.find((t) => t.id === id);
-  return tb ? `${tb.name} (${tb.start}–${tb.end})` : id;
-}
+
 function pct(n, d) { return d ? Math.round((n / d) * 100) : 0; }
 function canTaskBeCompleted(task, state) {
   if (!state) return false;
@@ -120,12 +117,9 @@ function weekdayIndexFromISO(dateISO, tz) {
   }
 }
 
-function getTimeBlockLabelFromSettings(settings, id) {
-  const blocks = (settings && settings.checklists && Array.isArray(settings.checklists.timeBlocks))
-    ? settings.checklists.timeBlocks
-    : [];
-  const block = blocks.find((b) => b.id === id);
-  return block ? `${block.name} (${block.start}–${block.end})` : id;
+function getTimeBlockLabelFromLists(blocks, id) {
+  const b = (blocks || []).find(tb => tb.id === id);
+  return b ? `${b.name} (${b.start}–${b.end})` : id;
 }
 
 
@@ -257,7 +251,7 @@ function EmployeeView({
   submissions,
   setSubmissions,
   setWorking,
-  settings,
+  checklists
 }) {
   return (
     <Stack gap="md">
@@ -288,7 +282,7 @@ function EmployeeView({
               <div>
                 <Text fw={600}>{tl.name}</Text>
                 <Text c="dimmed" fz="sm">
-                  {getTimeBlockLabelFromSettings(settings, tl.timeBlockId)}
+                {getTimeBlockLabelFromLists(checklists.timeBlocks, tl.timeBlockId)}
                 </Text>
                 <Badge mt={6} variant="light">
                   Progress: {done}/{total} ({pct(done, total)}%)
@@ -429,6 +423,38 @@ function EmployeeView({
     </Stack>
   );
 }
+
+function resolveTasklistsForDayFromLists({ timeBlocks, templates }, locationId, dateISO, tz = "UTC") {
+  const dow = weekdayIndexFromISO(dateISO, tz);
+  const tMap = Object.fromEntries((timeBlocks || []).map(tb => [tb.id, tb]));
+  const todays = (templates || []).filter(t =>
+    (t.active !== false) &&
+    t.locationId === locationId &&
+    Array.isArray(t.recurrence) &&
+    t.recurrence.includes(dow)
+  );
+  const list = todays.map(tpl => ({
+    id: tpl.id,
+    locationId: tpl.locationId,
+    name: tpl.name,
+    timeBlockId: tpl.timeBlockId,
+    recurrence: tpl.recurrence || [],
+    requiresApproval: tpl.requiresApproval !== false,
+    signoffMethod: tpl.signoffMethod || "PIN",
+    tasks: (tpl.tasks || []).map(t => ({
+      id: t.id, title: t.title, category: t.category || "",
+      inputType: t.inputType || "checkbox",
+      min: t.min ?? null, max: t.max ?? null,
+      photoRequired: !!t.photoRequired,
+      noteRequired: !!t.noteRequired,
+      allowNA: t.allowNA !== false,
+      priority: typeof t.priority === "number" ? t.priority : 3
+    }))
+  }));
+  list.sort((a, b) => (tMap[a.timeBlockId]?.start || "00:00").localeCompare(tMap[b.timeBlockId]?.start || "00:00"));
+  return list;
+}
+
 
 
 function EmployeeReworkCard({ s, setSubmissions, setWorking, getTaskMeta }) {
@@ -974,79 +1000,84 @@ const baseTheme = createTheme({
 });
 
 function AppInner() {
-  const { settings, updateSettings } = useSettings();
+  const { settings } = useSettings();
   const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb";
   const [mode, setMode] = useState("employee");
   const [activeLocationId, setActiveLocationId] = useState("");
   const [locations, setLocations] = useState([]);
   const [currentEmployee, setCurrentEmployee] = useState("");
   const [employees, setEmployees] = useState([]);
+  const [company, setCompany] = useState({ id: "", name: "", brandColor: "#0ea5e9", logo: null, timezone: "UTC" });
+  const [checklists, setChecklists] = useState({ timeBlocks: [], templates: [], overrides: [] });
+
+
+  // GET Company from DB
+  const loadCompany = useCallback(async () => {
+    const c = await getCompany(companyId);
+    setCompany({
+      id: c.id,
+      name: c.name ?? "",
+      brandColor: c.brand_color ?? "#0ea5e9",
+      logo: c.logo ?? null,
+      timezone: c.timezone ?? "UTC",
+    });
+  }, [companyId]);
 
   // load once on mount
   const refreshHeaderData = React.useCallback(async () => {
-       const [users, locs] = await Promise.all([fetchUsers(), fetchLocations()]);
-       setEmployees(users);
-       setLocations(locs);
-       // keep selections valid
-       setCurrentEmployee((cur) => users.find(u => String(u.id) === String(cur)) ? cur : (users[0] ? String(users[0].id) : ""));
-       setActiveLocationId((cur) => locs.find(l => String(l.id) === String(cur)) ? cur : (locs[0] ? String(locs[0].id) : ""));
-     }, []);
-    
-     const refreshCompanySettings = React.useCallback(async () => {
-       const c = await getCompany(companyId);
-       updateSettings(prev => ({
-         ...prev,
-         company: {
-           ...prev.company,
-           id: c.id,
-           name: c.name,
-           brandColor: c.brand_color || prev.company.brandColor,
-           timezone: c.timezone || prev.company.timezone,
-           // if you store logo in DB, map it here:
-           logo: c.logo ?? prev.company.logo
-         }
-       }));
-     }, [companyId, updateSettings]);
-    
-     // initial load
-      useEffect(() => { 
-         refreshHeaderData(); 
-         refreshCompanySettings();   // <-- hydrate header (name/color/logo) from DB at startup
-      }, [refreshHeaderData, refreshCompanySettings]);
-    
-     // live updates when Admin creates/edits/deletes
-     useEffect(() => {
-       const ch = supabase
-         .channel("header-sync")
-         .on("postgres_changes",
-           { event: "*", schema: "public", table: "location", filter: `company_id=eq.${companyId}` },
-           () => { refreshHeaderData(); }
-         )
-         .on("postgres_changes",
-           { event: "*", schema: "public", table: "app_user", filter: `company_id=eq.${companyId}` },
-           () => { refreshHeaderData(); }
-         )
-         .on("postgres_changes",
-           { event: "UPDATE", schema: "public", table: "company", filter: `id=eq.${companyId}` },
-           () => { refreshCompanySettings(); }
-         )
-         .subscribe();
-       return () => { supabase.removeChannel(ch); };
-     }, [companyId, refreshHeaderData, refreshCompanySettings]);
+    const [users, locs] = await Promise.all([fetchUsers(), fetchLocations()]);
+    setEmployees(users);
+    setLocations(locs);
+    // keep selections valid
+    setCurrentEmployee((cur) => users.find(u => String(u.id) === String(cur)) ? cur : (users[0] ? String(users[0].id) : ""));
+    setActiveLocationId((cur) => locs.find(l => String(l.id) === String(cur)) ? cur : (locs[0] ? String(locs[0].id) : ""));
+  }, []);
 
-  // build Mantine <Select/> options
-  const employeeOptions = useMemo(() => {
-    return employees
-      // keep only active if you want; else remove this line
-      .filter(u => u.is_active !== false)
-      .map(u => ({
-        value: String(u.id),                            // Mantine Select expects strings
-        label: u.display_name || u.email || String(u.id) // pick what you have
-      }));
-  }, [employees]);
+  const refreshCompanySettings = loadCompany;
+
+  // initial load
+  useEffect(() => { refreshHeaderData(); loadCompany(); }, [refreshHeaderData, loadCompany]);
+
+  // live updates when Admin creates/edits/deletes
   useEffect(() => {
-    document.documentElement.style.setProperty("--brand", settings.company.brandColor || "#0ea5e9");
-  }, [settings.company.brandColor])
+    const ch = supabase
+      .channel("header-sync")
+      .on("postgres_changes",
+        { event: "*", schema: "public", table: "location", filter: `company_id=eq.${companyId}` },
+        () => { refreshHeaderData(); }
+      )
+      .on("postgres_changes",
+        { event: "*", schema: "public", table: "app_user", filter: `company_id=eq.${companyId}` },
+        () => { refreshHeaderData(); }
+      )
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "company", filter: `id=eq.${companyId}` }, () => { loadCompany(); })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [companyId, refreshHeaderData, loadCompany]);
+
+  // Sets the checklist items
+  const loadChecklists = useCallback(async () => {
+    const [tbs, tpls] = await Promise.all([listTimeBlocks(), listTasklistTemplates()]);
+    setChecklists({ timeBlocks: tbs, templates: tpls, overrides: [] }); // overrides still local
+  }, []);
+
+  // Queries to write to the DB regarding checklists and tasks
+  useEffect(() => { loadChecklists(); }, [loadChecklists]);
+
+  useEffect(() => {
+    const ch = supabase
+      .channel("checklists-sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "time_block" }, () => loadChecklists())
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_template" }, () => loadChecklists())
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_task" }, () => loadChecklists())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [loadChecklists]);
+
+  // Sets the brand color to whatever the DB has it as
+  useEffect(() => {
+    document.documentElement.style.setProperty("--brand", company.brandColor || "#0ea5e9");
+  }, [company.brandColor]);
 
   // Persisted scheme (UI preference)
   const [scheme, setScheme] = useLocalStorage({
@@ -1055,12 +1086,6 @@ function AppInner() {
   });
 
   // Keep activeLocation valid when Admin edits locations
-  useEffect(() => {
-    if (!locations.find((l) => String(l.id) === String(activeLocationId))) {
-      setActiveLocationId(locations[0]?.id ? String(locations[0].id) : "");
-    }
-  }, [locations, activeLocationId]);
-
   useEffect(() => {
     if (!locations.find((l) => String(l.id) === String(activeLocationId))) {
       setActiveLocationId(locations[0]?.id ? String(locations[0].id) : "");
@@ -1077,8 +1102,8 @@ function AppInner() {
   // Today’s tasklists (from admin templates + ad-hoc)
   const tasklistsToday = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    return resolveTasklistsForDay(settings, activeLocationId, today);
-  }, [settings, activeLocationId]);
+    return resolveTasklistsForDayFromLists(checklists, activeLocationId, today, company.timezone);
+  }, [checklists, activeLocationId, company.timezone]);
 
   // Helpers now read from today's resolved lists
   function getTasklistById(id) {
@@ -1149,7 +1174,6 @@ function AppInner() {
     setSubmissions(prev => [...all, ...prev]);
     alert(`Seeded ${all.length} submissions over ${days} days.`);
   }
-  // SEED INFO END -----------------------------------------------------  
 
 
   // Working state (per tasklist)
@@ -1195,7 +1219,7 @@ function AppInner() {
       return;
     }
     const { error } = await supabase
-      .from("tasks")
+      .from("tasklist_task")
       .update(taskState)
       .eq("id", task.id)
       .eq("tasklist_id", tasklist.id);
@@ -1309,16 +1333,16 @@ function AppInner() {
           <Group h={64} px="md" justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
             {/* left */}
             <Group gap="sm">
-              {settings.company.logo ? (
+              {company.logo ? (
                 <img
-                  src={settings.company.logo}
+                  src={company.logo}
                   alt="Logo"
                   style={{ width: 28, height: 28, borderRadius: 8, objectFit: "cover" }}
                 />
               ) : (
-                <div style={{ width: 28, height: 28, borderRadius: 8, background: settings.company.brandColor }} />
+                <div style={{ width: 28, height: 28, borderRadius: 8, background: company.brandColor }} />
               )}
-              <Text fw={700}>{settings.company.name}</Text>
+              <Text fw={700}>{company.name}</Text>
             </Group>
             {/* right */}
             <Group gap="xs" wrap="wrap">
@@ -1354,6 +1378,8 @@ function AppInner() {
             {mode === "employee" && (
               <EmployeeView
                 tasklists={tasklistsToday}
+                checklists={checklists}
+                timezone={company.timezone}
                 working={working}
                 updateTaskState={updateTaskState}
                 handleComplete={handleComplete}
@@ -1362,17 +1388,16 @@ function AppInner() {
                 submissions={submissions}
                 setSubmissions={setSubmissions}
                 setWorking={setWorking}
-                settings={settings}
               />
             )}
             {mode === "manager" && (
               <ManagerView
                 submissions={submissions}
+                checklists={checklists}
+                locations={locations}
                 setSubmissions={setSubmissions}
                 setWorking={setWorking}
                 getTaskMeta={getTaskMetaToday}
-                settings={settings}
-                locations={locations}
               />
             )}
 
@@ -1380,11 +1405,12 @@ function AppInner() {
               <div style={{ paddingInline: "1px", paddingTop: 0, paddingBottom: "16px" }}>
                 <AdminView
                   tasklists={MOCK_TASKLISTS}
+                  onReloadChecklists={loadChecklists}
                   submissions={submissions}
                   onBrandColorChange={() => { }}
                   locations={locations}
                   refreshHeaderData={refreshHeaderData}
-                  refreshCompanySettings={refreshCompanySettings}  
+                  refreshCompanySettings={refreshCompanySettings}
                 />
               </div>
             )}
