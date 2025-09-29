@@ -8,7 +8,6 @@ import {
 import { supabase } from "./lib/supabase.js";
 
 import { IconUpload, IconDeviceFloppy, IconTrash, IconPlus, IconSettings } from "@tabler/icons-react";
-import { useSettings } from "./settings-store.jsx";
 import {
   hydrateAll, updateCompany,
   listLocations, createLocation, updateLocation, deleteLocation,
@@ -17,10 +16,7 @@ import {
   listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
 } from "./queries.js";
 
-export default function AdminView({ refreshHeaderData, refreshCompanySettings }) {
-  const { settings, updateSettings } = useSettings();
-
-  const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb";
+export default function AdminView({ companyId, refreshHeaderData, refreshCompanySettings }) {
 
   const [view, setView] = useState("company");
   const [draft, setDraft] = useState({

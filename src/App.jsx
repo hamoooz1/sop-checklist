@@ -34,9 +34,8 @@ import {
 
 import { useLocalStorage } from "@mantine/hooks";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
-import { SettingsProvider, useSettings } from "./settings-store.jsx";
-import fetchUsers, { fetchLocations, getCompany } from "./queries.js";
-import { listTimeBlocks, listTasklistTemplates } from "./queries.js";
+import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
+import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates } from "./queries.js";
 
 /** ---------------------- Mock Data ---------------------- */
 const TIME_BLOCKS = [
@@ -282,7 +281,7 @@ function EmployeeView({
               <div>
                 <Text fw={600}>{tl.name}</Text>
                 <Text c="dimmed" fz="sm">
-                {getTimeBlockLabelFromLists(checklists.timeBlocks, tl.timeBlockId)}
+                  {getTimeBlockLabelFromLists(checklists.timeBlocks, tl.timeBlockId)}
                 </Text>
                 <Badge mt={6} variant="light">
                   Progress: {done}/{total} ({pct(done, total)}%)
@@ -1000,8 +999,15 @@ const baseTheme = createTheme({
 });
 
 function AppInner() {
-  const { settings } = useSettings();
-  const companyId = "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb";
+  const [companyId, setCompanyId] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const cid = await getMyCompanyId();
+      setCompanyId(cid);
+    })();
+  }, []);
+
   const [mode, setMode] = useState("employee");
   const [activeLocationId, setActiveLocationId] = useState("");
   const [locations, setLocations] = useState([]);
@@ -1013,10 +1019,10 @@ function AppInner() {
 
   // GET Company from DB
   const loadCompany = useCallback(async () => {
+    // [COMPANY_SCOPE]
     const c = await getCompany(companyId);
     setCompany({
-      id: c.id,
-      name: c.name ?? "",
+      id: c.id, name: c.name ?? "",
       brandColor: c.brand_color ?? "#0ea5e9",
       logo: c.logo ?? null,
       timezone: c.timezone ?? "UTC",
@@ -1024,14 +1030,14 @@ function AppInner() {
   }, [companyId]);
 
   // load once on mount
-  const refreshHeaderData = React.useCallback(async () => {
-    const [users, locs] = await Promise.all([fetchUsers(), fetchLocations()]);
+  const refreshHeaderData = useCallback(async () => {
+    // [COMPANY_SCOPE]
+    const [users, locs] = await Promise.all([fetchUsers(companyId), fetchLocations(companyId)]);
     setEmployees(users);
     setLocations(locs);
-    // keep selections valid
     setCurrentEmployee((cur) => users.find(u => String(u.id) === String(cur)) ? cur : (users[0] ? String(users[0].id) : ""));
     setActiveLocationId((cur) => locs.find(l => String(l.id) === String(cur)) ? cur : (locs[0] ? String(locs[0].id) : ""));
-  }, []);
+  }, [companyId]);
 
   const refreshCompanySettings = loadCompany;
 
@@ -1039,40 +1045,35 @@ function AppInner() {
   useEffect(() => { refreshHeaderData(); loadCompany(); }, [refreshHeaderData, loadCompany]);
 
   // live updates when Admin creates/edits/deletes
+  // realtime for header lists (scoped)
   useEffect(() => {
+    // [COMPANY_SCOPE]
+    if (!companyId) return;
     const ch = supabase
-      .channel("header-sync")
-      .on("postgres_changes",
-        { event: "*", schema: "public", table: "location", filter: `company_id=eq.${companyId}` },
-        () => { refreshHeaderData(); }
-      )
-      .on("postgres_changes",
-        { event: "*", schema: "public", table: "app_user", filter: `company_id=eq.${companyId}` },
-        () => { refreshHeaderData(); }
-      )
-    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "company", filter: `id=eq.${companyId}` }, () => { loadCompany(); })
+      .channel(`header-sync:${companyId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "location", filter: `company_id=eq.${companyId}` }, refreshHeaderData)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_user", filter: `company_id=eq.${companyId}` }, refreshHeaderData)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "company", filter: `id=eq.${companyId}` }, loadCompany)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [companyId, refreshHeaderData, loadCompany]);
 
-  // Sets the checklist items
+  // checklists data (time blocks + templates)
   const loadChecklists = useCallback(async () => {
-    const [tbs, tpls] = await Promise.all([listTimeBlocks(), listTasklistTemplates()]);
-    setChecklists({ timeBlocks: tbs, templates: tpls, overrides: [] }); // overrides still local
-  }, []);
+    const [tbs, tpls] = await Promise.all([listTimeBlocks(), listTasklistTemplates(companyId /* [COMPANY_SCOPE] */)]);
+    setChecklists({ timeBlocks: tbs, templates: tpls, overrides: [] });
+  }, [companyId]);
 
-  // Queries to write to the DB regarding checklists and tasks
   useEffect(() => { loadChecklists(); }, [loadChecklists]);
-
   useEffect(() => {
     const ch = supabase
-      .channel("checklists-sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "time_block" }, () => loadChecklists())
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_template" }, () => loadChecklists())
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_task" }, () => loadChecklists())
+      .channel(`checklists-sync:${companyId}`) // [COMPANY_SCOPE]
+      .on("postgres_changes", { event: "*", schema: "public", table: "time_block" }, loadChecklists)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_template" }, loadChecklists)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_task" }, loadChecklists)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [loadChecklists]);
+  }, [companyId, loadChecklists]);
 
   // Sets the brand color to whatever the DB has it as
   useEffect(() => {
@@ -1311,15 +1312,6 @@ function AppInner() {
   }
 
   // before the return, right after hooks:
-  useEffect(() => {
-    settings.__seedDemo = () =>
-      seedDemoSubmissions({
-        days: 45,
-        perDay: [0, 4],
-        employees: ["Employee A", "Employee B", "Employee C", ...settings.users.map((u) => u.email || u.id)],
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, tasklistsToday]);
 
   return (
     <MantineProvider theme={baseTheme} forceColorScheme={scheme}>
@@ -1368,6 +1360,11 @@ function AppInner() {
                 data={locations.map((l) => ({ value: String(l.id), label: l.name }))}
                 w={200}
               />
+              <Button onClick={async () => {
+                await supabase.auth.signOut();
+              }}>
+                Logout
+              </Button>
               <ThemeToggle scheme={scheme} setScheme={setScheme} />
             </Group>
           </Group>
@@ -1405,6 +1402,7 @@ function AppInner() {
               <div style={{ paddingInline: "1px", paddingTop: 0, paddingBottom: "16px" }}>
                 <AdminView
                   tasklists={MOCK_TASKLISTS}
+                  companyId={company.id}
                   onReloadChecklists={loadChecklists}
                   submissions={submissions}
                   onBrandColorChange={() => { }}
@@ -1424,10 +1422,80 @@ function AppInner() {
   );
 }
 
+
+
+import Landing from "./marketing/Landing.jsx";
+import AuthShell from "./marketing/AuthShell.jsx";
+import OnboardingWizard from "./marketing/OnboardingWizard.jsx";
+
 export default function App() {
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // track auth session
+  useEffect(() => {
+    let unsub;
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const sub = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    unsub = () => sub.data.subscription.unsubscribe();
+    return () => { unsub && unsub(); };
+  }, []);
+
+  // load profile for current user
+  useEffect(() => {
+    async function loadProfile() {
+      if (!session) { setProfile(null); setLoading(false); return; }
+      const { data, error } = await supabase
+        .from("profile")
+        .select("*")
+        .eq("id", session.user.id)
+        .single();
+      setProfile(error ? null : data);
+      setLoading(false);
+    }
+    loadProfile();
+  }, [session]);
+
+  if (loading) return null;
+
+  // Logged out → Landing + Auth
+  if (!session) {
+    return (
+      <MantineProvider>
+        <AppShell withBorder={false}>
+          <AppShell.Main>
+            <AuthShell>
+              <Landing />
+            </AuthShell>
+          </AppShell.Main>
+        </AppShell>
+      </MantineProvider>
+    );
+  }
+
+  // Logged in but no company yet → Onboarding (creates company, location, mirror app_user)
+  if (!profile?.company_id) {
+    return (
+      <MantineProvider>
+        <OnboardingWizard
+          onDone={async () => {
+            const { data } = await supabase
+              .from("profile")
+              .select("*")
+              .eq("id", session.user.id)
+              .single();
+            setProfile(data);
+          }}
+        />
+      </MantineProvider>
+    );
+  }
+
+  // Fully in the app
   return (
-    <SettingsProvider>
+    <MantineProvider>
       <AppInner />
-    </SettingsProvider>
+    </MantineProvider>
   );
 }

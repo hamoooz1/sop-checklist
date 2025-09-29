@@ -1,177 +1,43 @@
-// src/queries.js
-// Centralized Supabase data access for your app.
-//
-// Expected tables (you can adapt names/columns easily):
-// - locations: { id (uuid or text PK), name text, timezone text, created_at timestamptz }
-// - users:     { id (uuid PK), email text, role text, locations text[] }
-// - tasks:     { id (uuid or text PK), tasklist_id text, status text, value numeric, note text,
-//               photos text[] (urls), na boolean, review_status text, updated_at timestamptz }
-// - (optional/next) submissions & submission_tasks (not required for the helpers below)
-//
-// Storage:
-// - Bucket: "task-evidence" (public). RLS/policies should allow read for anon if you want.
-//   We never hardcode base URL; we use getPublicUrl().
+/* Queries.js file containing all helpers and queries to DB*/
 
 import { supabase } from "./lib/supabase";
+import { getMyCompanyId } from "./lib/company";
 
 // ---------- tiny utils ----------
 const BUCKET = "evidence";
 
-export default async function fetchUsers() {
-  const { data, error } = await supabase
-    .from("app_user")
-    .select("*")
-    .eq("company_id", "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb");
-  if (error) {
-    throw new Error(`fetchUsers: ${error.message}`);
-  } 
-  return data ?? [];
-}
-
-export async function fetchLocations() {
-  const { data, error } = await supabase
-    .from("location")
-    .select("*")
-    .eq("company_id", "4f0be4a0-bb1b-409e-bb98-8e6fbd0c8ccb");
-  if (error) {
-    throw new Error(`fetchLocations: ${error.message}`);
-  } 
-  return data ?? [];
-}
-
-// -----------------------------
-// Mapping helpers (UI <-> DB)
-// -----------------------------
-const pad = (n) => String(n).padStart(2, "0");
-const toTime = (hhmm) => (hhmm?.length === 5 ? `${hhmm}:00` : hhmm || null);
-const fromTime = (t) => (t ? t.slice(0, 5) : "");
-
-const toUiTimeBlock = (r) => ({
-  id: r.id,
-  name: r.name,
-  start: fromTime(r.start_time),
-  end: fromTime(r.end_time),
-});
-const toDbTimeBlock = (tb) => ({
-  id: tb.id,
-  name: tb.name,
-  start_time: toTime(tb.start),
-  end_time: toTime(tb.end),
-});
-
-const toUiTask = (r) => ({
-  id: r.id,
-  title: r.title,
-  category: r.category || "",
-  inputType: r.input_type || "checkbox",
-  min: r.min ?? null,
-  max: r.max ?? null,
-  photoRequired: !!r.photo_required,
-  noteRequired: !!r.note_required,
-  allowNA: r.allow_na !== false,
-  priority: r.priority ?? 3,
-});
-const toDbTask = (t, tasklist_id) => ({
-  id: t.id, // if undefined, DB will assign if default uuid() is set
-  tasklist_id,
-  title: t.title,
-  category: t.category || null,
-  input_type: t.inputType || "checkbox",
-  min: t.min,
-  max: t.max,
-  photo_required: !!t.photoRequired,
-  note_required: !!t.noteRequired,
-  allow_na: !!t.allowNA,
-  priority: typeof t.priority === "number" ? t.priority : 3,
-});
-
-const toUiTemplate = (r) => ({
-  id: r.id,
-  name: r.name,
-  locationId: r.location_id,
-  timeBlockId: r.time_block_id,
-  recurrence: r.recurrence || [],
-  requiresApproval: r.requires_approval ?? true,
-  signoffMethod: r.signoff_method || "PIN",
-  active: r.active !== false,
-  tasks: (r.tasklist_task || []).map(toUiTask),
-});
-
-// -----------------------------
-// Company
-// -----------------------------
-export async function getCompany(companyId) {
-  const { data, error } = await supabase
-    .from("company")
-    .select("*")
-    .eq("id", companyId)
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function uploadCompanyLogo(companyId, file) {
-  const safe = file.name.replace(/\s+/g, "_");
-  const path = `company/${companyId}/${Date.now()}_${safe}`;
-  const { data, error } = await supabase
-    .storage.from("branding")
-    .upload(path, file, { upsert: true, contentType: file.type });
-  if (error) throw error;
-  const { data: pub } = supabase.storage.from("branding").getPublicUrl(path);
-  return pub.publicUrl; // store in company.logo
-}
-
-
-export async function updateCompany(companyId, patch) {
-  // Accepts { name?, brand_color?, timezone?, logo? }
-  const { error } = await supabase
-    .from("company")
-    .update(patch)
-    .eq("id", companyId);
-  if (error) throw error;
-}
-
-
-// -----------------------------
-// Locations (no company_id in schema)
-// -----------------------------
-export async function listLocations(companyId) {
-  const { data, error } = await supabase
-    .from("location")
-    .select("*")
-    .order("name", { ascending: true });
-  if (error) throw error;
-  return data;
-}
-
-export async function createLocation({ name, timezone, company_id }) {
-  const { error } = await supabase.from("location").insert([{ name, timezone, company_id }]);
-  if (error) throw error;
-}
-export async function updateLocation(id, patch) {
-  const { error } = await supabase.from("location").update(patch).eq("id", id);
-  if (error) throw error;
-}
-export async function deleteLocation(id) {
-  const { error } = await supabase.from("location").delete().eq("id", id);
-  if (error) throw error;
-}
-
 // -----------------------------
 // Users (scoped by company_id)
 // -----------------------------
-export async function listUsers(companyId) {
+export default async function fetchUsers(companyId) {
+  // [COMPANY_SCOPE]
+  const cid = companyId || (await getMyCompanyId());
+  if (!cid) return [];
   const { data, error } = await supabase
     .from("app_user")
     .select("*")
-    .eq("company_id", companyId)
+    .eq("company_id", cid)
+    .order("display_name", { ascending: true });
+  if (error) throw new Error(`fetchUsers: ${error.message}`);
+  return data ?? [];
+}
+export async function listUsers(companyId) {
+  // [COMPANY_SCOPE]
+  const cid = companyId || (await getMyCompanyId());
+  if (!cid) return [];
+  const { data, error } = await supabase
+    .from("app_user")
+    .select("*")
+    .eq("company_id", cid)
     .order("email", { ascending: true });
   if (error) throw error;
   return data;
 }
 export async function createUser(row) {
-  const { error } = await supabase.from("app_user").insert([row]);
-  alert("User Successfully Created!")
+  // row must include company_id
+  const payload = { ...row };
+  if (!payload.company_id) payload.company_id = await getMyCompanyId(); // [COMPANY_SCOPE]
+  const { error } = await supabase.from("app_user").insert([payload]);
   if (error) throw error;
 }
 export async function updateUser(id, patch) {
@@ -184,7 +50,123 @@ export async function deleteUser(id) {
 }
 
 // -----------------------------
-// Time blocks
+// Locations — company scoped
+// -----------------------------
+export async function fetchLocations(companyId) {
+  // [COMPANY_SCOPE]
+  const cid = companyId || (await getMyCompanyId());
+  if (!cid) return [];
+  const { data, error } = await supabase
+    .from("location")
+    .select("*")
+    .eq("company_id", cid)
+    .order("name", { ascending: true });
+  if (error) throw new Error(`fetchLocations: ${error.message}`);
+  return data ?? [];
+}
+
+export async function listLocations(companyId) {
+  // [COMPANY_SCOPE]
+  const cid = companyId || (await getMyCompanyId());
+  if (!cid) return [];
+  const { data, error } = await supabase
+    .from("location")
+    .select("*")
+    .eq("company_id", cid)
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+export async function createLocation({ name, timezone, company_id }) {
+  // [COMPANY_SCOPE] ensure cid
+  const cid = company_id || (await getMyCompanyId());
+  const { error } = await supabase
+    .from("location")
+    .insert([{ name, timezone, company_id: cid }]);
+  if (error) throw error;
+}
+export async function updateLocation(id, patch) {
+  const { error } = await supabase.from("location").update(patch).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteLocation(id) {
+  const { error } = await supabase.from("location").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// -----------------------------
+// Company
+// -----------------------------
+export async function getCompany(companyId) {
+  // [COMPANY_SCOPE]
+  const cid = companyId || (await getMyCompanyId());
+  if (!cid) return null;
+  const { data, error } = await supabase.from("company").select("*").eq("id", cid).single();
+  if (error) throw error;
+  return data;
+}
+export async function uploadCompanyLogo(companyId, file) {
+  // [COMPANY_SCOPE]
+  const cid = companyId || (await getMyCompanyId());
+  const safe = file.name.replace(/\s+/g, "_");
+  const path = `company/${cid}/${Date.now()}_${safe}`;
+  const { error } = await supabase
+    .storage.from("branding")
+    .upload(path, file, { upsert: true, contentType: file.type });
+  if (error) throw error;
+  const { data: pub } = supabase.storage.from("branding").getPublicUrl(path);
+  return pub.publicUrl; // store in company.logo
+}
+export async function updateCompany(companyId, patch) {
+  // [COMPANY_SCOPE]
+  const cid = companyId || (await getMyCompanyId());
+  const { error } = await supabase.from("company").update(patch).eq("id", cid);
+  if (error) throw error;
+}
+
+// -----------------------------
+// Mapping helpers (UI <-> DB)
+// -----------------------------
+const toTime = (hhmm) => (hhmm?.length === 5 ? `${hhmm}:00` : hhmm || null);
+const fromTime = (t) => (t ? t.slice(0, 5) : "");
+
+const toUiTimeBlock = (r) => ({ id: r.id, name: r.name, start: fromTime(r.start_time), end: fromTime(r.end_time) });
+const toDbTimeBlock = (tb) => ({ id: tb.id, name: tb.name, start_time: toTime(tb.start), end_time: toTime(tb.end) });
+
+const toUiTask = (r) => ({
+  id: r.id, title: r.title, category: r.category || "",
+  inputType: r.input_type || "checkbox",
+  min: r.min ?? null, max: r.max ?? null,
+  photoRequired: !!r.photo_required,
+  noteRequired: !!r.note_required,
+  allowNA: r.allow_na !== false,
+  priority: r.priority ?? 3,
+});
+const toDbTask = (t, tasklist_id) => ({
+  id: t.id, tasklist_id,
+  title: t.title, category: t.category || null,
+  input_type: t.inputType || "checkbox",
+  min: t.min, max: t.max,
+  photo_required: !!t.photoRequired,
+  note_required: !!t.noteRequired,
+  allow_na: !!t.allowNA,
+  priority: typeof t.priority === "number" ? t.priority : 3,
+});
+const toUiTemplate = (r) => ({
+  id: r.id, name: r.name,
+  locationId: r.location_id,
+  timeBlockId: r.time_block_id,
+  recurrence: r.recurrence || [],
+  requiresApproval: r.requires_approval ?? true,
+  signoffMethod: r.signoff_method || "PIN",
+  active: r.active !== false,
+  tasks: (r.tasklist_task || []).map(toUiTask),
+});
+
+// -----------------------------
+// Time blocks (global to company or global table?)
+// If time_block is global (no company_id), leave as-is. If it's per-company, add filter here.
 // -----------------------------
 export async function listTimeBlocks() {
   const { data, error } = await supabase
@@ -194,7 +176,6 @@ export async function listTimeBlocks() {
   if (error) throw error;
   return data.map(toUiTimeBlock);
 }
-
 export async function upsertTimeBlock(tbUi) {
   const payload = toDbTimeBlock(tbUi);
   const { error } = await supabase.from("time_block").upsert(payload);
@@ -206,10 +187,10 @@ export async function removeTimeBlock(id) {
 }
 
 // -----------------------------
-// Tasklist templates + tasks
+// Tasklist templates + tasks — scope via location.company_id (enforced by RLS)
 // -----------------------------
-export async function listTasklistTemplates() {
-  // expects FK relation: tasklist_task.tasklist_id -> tasklist_template.id
+export async function listTasklistTemplates(companyId) {
+  // [COMPANY_SCOPE] If your RLS already limits by company through location FK, simple select is okay.
   const { data, error } = await supabase
     .from("tasklist_template")
     .select("*, tasklist_task(*)")
@@ -217,17 +198,13 @@ export async function listTasklistTemplates() {
   if (error) throw error;
   return data.map(toUiTemplate);
 }
-
 export async function deleteTasklistTemplate(id) {
-  // ensure tasks are removed via FK ON DELETE CASCADE or do it manually:
   const { error } = await supabase.from("tasklist_template").delete().eq("id", id);
   if (error) throw error;
 }
-
 export async function upsertTasklistTemplateWithTasks(tplUi) {
-  // 1) upsert template
   const tplRow = {
-    id: tplUi.id, // allow undefined for INSERT if default uuid()
+    id: tplUi.id,
     name: tplUi.name,
     location_id: tplUi.locationId,
     time_block_id: tplUi.timeBlockId,
@@ -246,27 +223,23 @@ export async function upsertTasklistTemplateWithTasks(tplUi) {
   const template = tplRes?.[0];
   const tasklist_id = template.id;
 
-  // 2) read existing tasks to know which to delete
   const { data: existing, error: exErr } = await supabase
     .from("tasklist_task")
     .select("id")
     .eq("tasklist_id", tasklist_id);
   if (exErr) throw exErr;
+
   const existingIds = new Set((existing || []).map((t) => t.id));
   const incomingIds = new Set((tplUi.tasks || []).map((t) => t.id).filter(Boolean));
-
   const toDelete = [...existingIds].filter((id) => !incomingIds.has(id));
   if (toDelete.length) {
     const { error } = await supabase.from("tasklist_task").delete().in("id", toDelete);
     if (error) throw error;
   }
 
-  // 3) upsert/insert tasks
   const taskRows = (tplUi.tasks || []).map((t) => toDbTask(t, tasklist_id));
   if (taskRows.length) {
-    const { error } = await supabase
-      .from("tasklist_task")
-      .upsert(taskRows, { onConflict: "id" });
+    const { error } = await supabase.from("tasklist_task").upsert(taskRows, { onConflict: "id" });
     if (error) throw error;
   }
 
@@ -274,15 +247,19 @@ export async function upsertTasklistTemplateWithTasks(tplUi) {
 }
 
 // -----------------------------
-// One-shot hydrate for Admin
+// One-shot hydrate for Admin — company scoped
 // -----------------------------
 export async function hydrateAll(companyId) {
+  // [COMPANY_SCOPE]
+  const cid = companyId || (await getMyCompanyId());
+  if (!cid) return { company: null, locations: [], users: [], timeBlocks: [], templates: [] };
+
   const [company, locations, users, timeBlocks, templates] = await Promise.all([
-    getCompany(companyId),
-    listLocations(),
-    listUsers(companyId),
+    getCompany(cid),                 // [COMPANY_SCOPE]
+    listLocations(cid),              // [COMPANY_SCOPE]
+    listUsers(cid),                  // [COMPANY_SCOPE]
     listTimeBlocks(),
-    listTasklistTemplates(),
+    listTasklistTemplates(cid),      // [COMPANY_SCOPE]
   ]);
   return { company, locations, users, timeBlocks, templates };
 }
