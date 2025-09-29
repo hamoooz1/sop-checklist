@@ -24,7 +24,8 @@ import {
   SegmentedControl,
   rem,
   Tabs,
-
+  Center,
+  Loader
 } from "@mantine/core";
 
 import { supabase } from "./lib/supabase.js";
@@ -1068,7 +1069,7 @@ function AppInner() {
   useEffect(() => {
     const ch = supabase
       .channel(`checklists-sync:${companyId}`) // [COMPANY_SCOPE]
-      .on("postgres_changes", { event: "*", schema: "public", table: "time_block" }, loadChecklists)
+      .on("postgres_changes", { event: "*", schema: "public", table: "time_block", filter: `company_id=eq.${companyId}` }, loadChecklists)
       .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_template" }, loadChecklists)
       .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_task" }, loadChecklists)
       .subscribe();
@@ -1240,9 +1241,11 @@ function AppInner() {
 
   const handleUpload = async (tasklist, task, file) => {
     // Upload file to Supabase Storage
+    const cid = await getMyCompanyId();
+
     const { data, error } = await supabase.storage
-      .from('evidence')  // Replace with your actual bucket name
-      .upload(`task_${task.id}/${file.name}`, file);
+      .from('evidence')
+      .upload(`company/${cid}/task/${tasklist.id}/${task.id}/${Date.now()}_${file.name}`, file);
 
     if (error) {
       console.error(error);
@@ -1371,49 +1374,53 @@ function AppInner() {
         </AppShell.Header>
 
         <AppShell.Main>
-          <Container size="xl">
-            {mode === "employee" && (
-              <EmployeeView
-                tasklists={tasklistsToday}
-                checklists={checklists}
-                timezone={company.timezone}
-                working={working}
-                updateTaskState={updateTaskState}
-                handleComplete={handleComplete}
-                handleUpload={handleUpload}
-                signoff={signoff}
-                submissions={submissions}
-                setSubmissions={setSubmissions}
-                setWorking={setWorking}
-              />
-            )}
-            {mode === "manager" && (
-              <ManagerView
-                submissions={submissions}
-                checklists={checklists}
-                locations={locations}
-                setSubmissions={setSubmissions}
-                setWorking={setWorking}
-                getTaskMeta={getTaskMetaToday}
-              />
-            )}
-
-            {mode === "admin" && (
-              <div style={{ paddingInline: "1px", paddingTop: 0, paddingBottom: "16px" }}>
-                <AdminView
-                  tasklists={MOCK_TASKLISTS}
-                  companyId={company.id}
-                  onReloadChecklists={loadChecklists}
+          {!companyId ? (
+                <Center mih="60dvh"><Loader /></Center>
+               ) : (
+            <Container size="xl">
+              {mode === "employee" && (
+                <EmployeeView
+                  tasklists={tasklistsToday}
+                  checklists={checklists}
+                  timezone={company.timezone}
+                  working={working}
+                  updateTaskState={updateTaskState}
+                  handleComplete={handleComplete}
+                  handleUpload={handleUpload}
+                  signoff={signoff}
                   submissions={submissions}
-                  onBrandColorChange={() => { }}
-                  locations={locations}
-                  refreshHeaderData={refreshHeaderData}
-                  refreshCompanySettings={refreshCompanySettings}
+                  setSubmissions={setSubmissions}
+                  setWorking={setWorking}
                 />
-              </div>
-            )}
+              )}
+              {mode === "manager" && (
+                <ManagerView
+                  submissions={submissions}
+                  checklists={checklists}
+                  locations={locations}
+                  setSubmissions={setSubmissions}
+                  setWorking={setWorking}
+                  getTaskMeta={getTaskMetaToday}
+                />
+              )}
 
-          </Container>
+              {mode === "admin" && (
+                <div style={{ paddingInline: "1px", paddingTop: 0, paddingBottom: "16px" }}>
+                  <AdminView
+                    tasklists={MOCK_TASKLISTS}
+                    companyId={company.id}
+                    onReloadChecklists={loadChecklists}
+                    submissions={submissions}
+                    onBrandColorChange={() => { }}
+                    locations={locations}
+                    refreshHeaderData={refreshHeaderData}
+                    refreshCompanySettings={refreshCompanySettings}
+                  />
+                </div>
+              )}
+
+            </Container>
+          )}
         </AppShell.Main>
 
         <PinDialog opened={pinModal.open} onClose={() => setPinModal({ open: false, onConfirm: null })} onConfirm={pinModal.onConfirm} />
@@ -1475,6 +1482,8 @@ export default function App() {
   }
 
   // Logged in but no company yet → Onboarding (creates company, location, mirror app_user)
+  if (session && !profile) return null;
+
   if (!profile?.company_id) {
     return (
       <MantineProvider>

@@ -132,7 +132,16 @@ const toTime = (hhmm) => (hhmm?.length === 5 ? `${hhmm}:00` : hhmm || null);
 const fromTime = (t) => (t ? t.slice(0, 5) : "");
 
 const toUiTimeBlock = (r) => ({ id: r.id, name: r.name, start: fromTime(r.start_time), end: fromTime(r.end_time) });
-const toDbTimeBlock = (tb) => ({ id: tb.id, name: tb.name, start_time: toTime(tb.start), end_time: toTime(tb.end) });
+const toDbTimeBlock = async (tb) => {
+  const cid = await getMyCompanyId();
+  return {
+    id: tb.id,
+    company_id: cid,
+    name: tb.name,
+    start_time: toTime(tb.start),
+    end_time: toTime(tb.end),
+  };
+};
 
 const toUiTask = (r) => ({
   id: r.id, title: r.title, category: r.category || "",
@@ -168,17 +177,21 @@ const toUiTemplate = (r) => ({
 // Time blocks (global to company or global table?)
 // If time_block is global (no company_id), leave as-is. If it's per-company, add filter here.
 // -----------------------------
-export async function listTimeBlocks() {
+export async function listTimeBlocks(companyId) {
+  const cid = companyId || (await getMyCompanyId());
   const { data, error } = await supabase
     .from("time_block")
     .select("*")
-    .order("start_time", { ascending: true });
+    .order("start_time", { ascending: true })
+    .eq("company_id", cid);
   if (error) throw error;
   return data.map(toUiTimeBlock);
 }
 export async function upsertTimeBlock(tbUi) {
-  const payload = toDbTimeBlock(tbUi);
-  const { error } = await supabase.from("time_block").upsert(payload);
+  const payload = await toDbTimeBlock(tbUi);
+  const { error } = await supabase
+    .from("time_block")
+    .upsert(payload, { onConflict: "company_id,id" }); // composite key
   if (error) throw error;
 }
 export async function removeTimeBlock(id) {
@@ -191,10 +204,12 @@ export async function removeTimeBlock(id) {
 // -----------------------------
 export async function listTasklistTemplates(companyId) {
   // [COMPANY_SCOPE] If your RLS already limits by company through location FK, simple select is okay.
+  const cid = companyId || (await getMyCompanyId());
   const { data, error } = await supabase
     .from("tasklist_template")
     .select("*, tasklist_task(*)")
-    .order("name", { ascending: true });
+    .order("name", { ascending: true })
+    .eq("company_id", cid);
   if (error) throw error;
   return data.map(toUiTemplate);
 }
@@ -203,8 +218,10 @@ export async function deleteTasklistTemplate(id) {
   if (error) throw error;
 }
 export async function upsertTasklistTemplateWithTasks(tplUi) {
+  const cid = await getMyCompanyId();
   const tplRow = {
     id: tplUi.id,
+    company_id: cid,
     name: tplUi.name,
     location_id: tplUi.locationId,
     time_block_id: tplUi.timeBlockId,
@@ -258,7 +275,7 @@ export async function hydrateAll(companyId) {
     getCompany(cid),                 // [COMPANY_SCOPE]
     listLocations(cid),              // [COMPANY_SCOPE]
     listUsers(cid),                  // [COMPANY_SCOPE]
-    listTimeBlocks(),
+    listTimeBlocks(cid),
     listTasklistTemplates(cid),      // [COMPANY_SCOPE]
   ]);
   return { company, locations, users, timeBlocks, templates };
