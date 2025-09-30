@@ -40,7 +40,10 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
 
   const refreshUsers = useCallback(async () => {
     const rows = await listUsers(companyId);
-    setUsers(Array.isArray(rows) ? rows : []);
+    setUsers(Array.isArray(rows)
+      ? rows.map(u => ({ ...u, pin: u.pin ?? "" })) // <-- keep controlled
+      : []
+    );
   }, [companyId]);
 
   // Initial fetch
@@ -208,9 +211,18 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
               locations={locations}
               onInvite={async (row) => { await createUser({ ...row, company_id: companyId }); await refreshUsers(); refreshHeaderData?.(); }}
               onUpdate={async (id, patch) => {
-                setUsers(prev => prev.map(u => u.id === id ? { ...u, ...patch } : u));
+                if ("pin" in patch) {
+                  const digits = String(patch.pin ?? "").replace(/\D/g, "").slice(0, 6);
+                  // If your DB column is TEXT/VARCHAR (recommended), keep string:
+                  patch.pin = digits === "" ? null : digits;
+
+                  // If your DB column is SMALLINT/INT instead, use:
+                  // patch.pin = digits === "" ? null : Number(digits);
+                }
+
+                setUsers(prev => prev.map(u => (u.id === id ? { ...u, ...patch } : u)));
                 await updateUser(id, patch);
-                refreshHeaderData?.()
+                refreshHeaderData?.();
               }}
               onDelete={async (id) => {
                 setUsers(prev => prev.filter(u => u.id !== id));
@@ -423,16 +435,15 @@ function LocationsPane({ locations, onAdd, onUpdate, onDelete, companyId }) {
   );
 }
 
-function UsersPane({ companyId, users, locations, onInvite, onUpdate, onDelete }) {
+function UsersPane({ users, locations, onInvite, onUpdate, onDelete }) {
   const [addOpen, setAddOpen] = useState(false);
   const [draft, setDraft] = useState({
     email: "",
     display_name: "",
     role: "Employee",
-    // If your DB column is "location_id", rename this field and the two noted update spots below.
     location: locations[0]?.id || null,
     is_active: true,
-    pin: null,
+    pin: "",                 // <-- not null
   });
 
   const roleOptions = ["Admin", "Manager", "Employee"];
@@ -445,7 +456,7 @@ function UsersPane({ companyId, users, locations, onInvite, onUpdate, onDelete }
       role: "Employee",
       location: locations[0]?.id || null,
       is_active: true,
-      pin: null,
+      pin: "",               // <-- not null
     });
   }
 
@@ -471,6 +482,7 @@ function UsersPane({ companyId, users, locations, onInvite, onUpdate, onDelete }
               <Table.Th style={{ width: "26%" }}>Email</Table.Th>
               <Table.Th style={{ width: "16%" }}>Role</Table.Th>
               <Table.Th style={{ width: "24%" }}>Location</Table.Th>
+              <Table.Th style={{ width: "10%" }}>Pin</Table.Th>
               <Table.Th style={{ width: "6%" }}>Active</Table.Th>
               <Table.Th style={{ width: "4%" }} />
             </Table.Tr>
@@ -505,10 +517,34 @@ function UsersPane({ companyId, users, locations, onInvite, onUpdate, onDelete }
                 <Table.Td>
                   <Select
                     data={locations.map((l) => ({ value: l.id, label: l.name }))}
-                    value={u.location ?? null}     // or u.location_id if that's your column
-                    onChange={(v) => onUpdate(u.id, { location: v })} // or location_id: v
+                    value={u.location ?? null}
+                    onChange={(v) => onUpdate(u.id, { location: v })}
                     w="100%"
                     comboboxProps={{ withinPortal: true }}
+                  />
+                </Table.Td>
+                <Table.Td>
+                  <TextInput
+                    value={(u.pin ?? "").toString()}
+                    onChange={(e) => {
+                      const next = e.currentTarget.value.replace(/\D/g, "").slice(0, 6);
+                      onUpdate(u.id, { pin: next });
+                    }}
+                    onPaste={(e) => {
+                      e.preventDefault();
+                      const text = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+                      onUpdate(u.id, { pin: text });
+                    }}
+                    onBeforeInput={(e) => {
+                      // Prevent adding more than 6 characters (covers IME + mobile)
+                      const target = e.currentTarget;
+                      const selection = target.selectionEnd - target.selectionStart;
+                      const len = target.value.length - selection;
+                      if (len >= 6 && /\d/.test(e.data ?? "")) e.preventDefault();
+                    }}
+                    inputMode="numeric"
+                    pattern="\d*"
+                    maxLength={6}
                   />
                 </Table.Td>
                 <Table.Td>
@@ -573,16 +609,43 @@ function UsersPane({ companyId, users, locations, onInvite, onUpdate, onDelete }
             />
           </Group>
 
-          <Switch
-            label="Active"
-            checked={draft.is_active}
-            onChange={(e) => setDraft({ ...draft, is_active: e.currentTarget.checked })}
-          />
+          <Group grow wrap="nowrap">
+            <TextInput
+              label="PIN"
+              placeholder="123456"
+              value={draft.pin ?? ""}
+              onChange={(e) =>
+                setDraft(d => ({
+                  ...d,
+                  pin: e.currentTarget.value.replace(/\D/g, "").slice(0, 6),
+                }))
+              }
+              onPaste={(e) => {
+                e.preventDefault();
+                const text = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+                setDraft(d => ({ ...d, pin: text }));
+              }}
+              onBeforeInput={(e) => {
+                const target = e.currentTarget;
+                const selection = target.selectionEnd - target.selectionStart;
+                const len = target.value.length - selection;
+                if (len >= 6 && /\d/.test(e.data ?? "")) e.preventDefault();
+              }}
+              inputMode="numeric"
+              pattern="\d*"
+              maxLength={6}
+            />
+            <Switch
+              label="Active"
+              checked={draft.is_active}
+              onChange={(e) => setDraft({ ...draft, is_active: e.currentTarget.checked })}
+            />
+          </Group>
 
           <Group justify="flex-end" mt="xs">
             <Button
               onClick={async () => {
-                if (!draft.email.trim()) return alert("Email is required.");
+                if (!draft.email.trim() || !draft.display_name.trim() || !draft.pin.trim()) return alert("Name, email and PIN are required.");
                 await onInvite(draft); // parent already adds company_id and refreshes
                 resetDraft();
                 setAddOpen(false);
