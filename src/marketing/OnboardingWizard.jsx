@@ -11,52 +11,65 @@ export default function OnboardingWizard({ onDone }) {
   const [loading, setLoading] = useState(false);
 
   async function handleCreate() {
-    if (!companyName.trim()) { alert("Company name is required"); return; }
+    if (!companyName.trim()) {
+      alert("Company name is required");
+      return;
+    }
     setLoading(true);
     try {
-      // get current user/profile
-      const { data: auth } = await supabase.auth.getUser();
-      const user = auth?.user;
+      // 0) current auth user
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
-
-      // 1) create company
+  
+      // A friendly display name for seed records
+      const displayName =
+        user.user_metadata?.name ||
+        user.user_metadata?.full_name ||
+        user.email?.split("@")[0] ||
+        "Owner";
+  
+      // 1) create the company
       const { data: company, error: cErr } = await supabase
         .from("company")
         .insert({ name: companyName, timezone })
-        .select("*")
+        .select("id")
         .single();
       if (cErr) throw cErr;
-
-      // 2) attach my profile to company, set as Owner
-      const { data: profile, error: pErr } = await supabase
-        .from("profile")
-        .update({ company_id: company.id, role: "Owner" })
-        .eq("id", user.id)
-        .select("*")
-        .single();
-      if (pErr) throw pErr;
-
-      // 3) create default location
+  
+      // 2) create default location
       const { data: loc, error: lErr } = await supabase
         .from("location")
-        .insert({ company_id: company.id, name: locationName, timezone })
-        .select("*")
+        .insert({ company_id: company.id, name: locationName || "Main", timezone })
+        .select("id,name,timezone")
         .single();
       if (lErr) throw lErr;
-
-      // 4) create mirror app_user for PIN use (simple; store plaintext only for demo)
-      const displayName = profile.display_name || user.user_metadata?.name || profile.email || "Owner";
-      await supabase.from("app_user").insert({
+  
+      // 3) upsert the user's profile (profile.id = auth uid)
+      const { error: pErr } = await supabase
+        .from("profile")
+        .upsert({
+          id: user.id,
+          company_id: company.id,
+          display_name: displayName,
+          role: "Admin",
+          email: user.email ?? null, // if you keep email on profile
+        }, { onConflict: "id" });
+      if (pErr) throw pErr;
+  
+      // 4) create mirror app_user (for PIN/kiosk usage)
+      const { error: aErr } = await supabase.from("app_user").insert({
         company_id: company.id,
-        location_id: loc.id,
+        location: loc.id,
         display_name: displayName,
-        email: profile.email,
+        email: user.email ?? null,
         role: "Admin",
         is_active: true,
-        pin: pin || null
+        pin: pin || null, // plaintext only if this is just for demo
       });
-
-      onDone && onDone(profile);
+      if (aErr) throw aErr;
+  
+      // 5) let parent reload profile/company
+      await onDone?.();
     } catch (e) {
       console.error(e);
       alert(e.message || "Failed to set up your company");
@@ -64,6 +77,7 @@ export default function OnboardingWizard({ onDone }) {
       setLoading(false);
     }
   }
+  
 
   return (
     <Container size="sm" py="xl">

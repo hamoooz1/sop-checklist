@@ -38,42 +38,6 @@ import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/ico
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
 import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates } from "./queries.js";
 
-/** ---------------------- Mock Data ---------------------- */
-const TIME_BLOCKS = [
-  { id: "open", name: "Open", start: "05:00", end: "10:00" },
-  { id: "mid", name: "Mid-Shift", start: "11:00", end: "16:00" },
-  { id: "close", name: "Close", start: "20:00", end: "23:59" },
-];
-
-const MOCK_TASKLISTS = [
-  {
-    id: "tl_001",
-    locationId: "loc_001",
-    name: "Open — FOH",
-    timeBlockId: "open",
-    recurrence: [0, 1, 2, 3, 4, 5, 6],
-    requiresApproval: true,
-    signoffMethod: "PIN",
-    tasks: [
-      { id: "t_1", title: "Sanitize host stand", category: "Cleaning", inputType: "checkbox", photoRequired: true, noteRequired: false, allowNA: true, priority: 2 },
-      { id: "t_2", title: "Temp log: walk-in cooler", category: "Food Safety", inputType: "number", min: 32, max: 40, photoRequired: false, noteRequired: true, allowNA: false, priority: 1 },
-      { id: "t_3", title: "Stock napkins & menus", category: "Prep", inputType: "checkbox", photoRequired: false, noteRequired: false, allowNA: true, priority: 3 },
-    ],
-  },
-  {
-    id: "tl_002",
-    locationId: "loc_001",
-    name: "Close — BOH",
-    timeBlockId: "close",
-    recurrence: [0, 1, 2, 3, 4, 5, 6],
-    requiresApproval: true,
-    signoffMethod: "PIN",
-    tasks: [
-      { id: "t_4", title: "Deep clean fryers", category: "Cleaning", inputType: "checkbox", photoRequired: true, noteRequired: true, allowNA: false, priority: 1 },
-      { id: "t_5", title: "Label/date all prep", category: "Food Safety", inputType: "checkbox", photoRequired: false, noteRequired: true, allowNA: false, priority: 2 },
-    ],
-  },
-];
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -94,7 +58,6 @@ function canTaskBeCompleted(task, state) {
   }
   return true;
 }
-function getTasklistById(id) { return MOCK_TASKLISTS.find((tl) => tl.id === id); }
 function getTaskMeta(tasklistId, taskId) {
   const tl = getTasklistById(tasklistId);
   return tl?.tasks.find((x) => x.id === taskId) || { title: taskId, inputType: "checkbox" };
@@ -1061,16 +1024,22 @@ function AppInner() {
 
   // checklists data (time blocks + templates)
   const loadChecklists = useCallback(async () => {
-    const [tbs, tpls] = await Promise.all([listTimeBlocks(), listTasklistTemplates(companyId /* [COMPANY_SCOPE] */)]);
+    if (!companyId) return;
+    const [tbs, tpls] = await Promise.all([
+      listTimeBlocks(companyId),               // make sure your query is scoped
+      listTasklistTemplates(companyId)         // and returns tasks inside
+    ]);
     setChecklists({ timeBlocks: tbs, templates: tpls, overrides: [] });
   }, [companyId]);
 
   useEffect(() => { loadChecklists(); }, [loadChecklists]);
   useEffect(() => {
+    if (!companyId) return;
     const ch = supabase
       .channel(`checklists-sync:${companyId}`) // [COMPANY_SCOPE]
       .on("postgres_changes", { event: "*", schema: "public", table: "time_block", filter: `company_id=eq.${companyId}` }, loadChecklists)
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_template" }, loadChecklists)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_template", filter: `company_id=eq.${companyId}` }, loadChecklists)
+      // If task rows don’t have company_id, add a trigger/column or skip this filter.
       .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_task" }, loadChecklists)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -1107,76 +1076,10 @@ function AppInner() {
     return resolveTasklistsForDayFromLists(checklists, activeLocationId, today, company.timezone);
   }, [checklists, activeLocationId, company.timezone]);
 
-  // Helpers now read from today's resolved lists
-  function getTasklistById(id) {
-    return tasklistsToday.find((tl) => tl.id === id);
-  }
   function getTaskMetaToday(tasklistId, taskId) {
     const tl = tasklistsToday.find((x) => x.id === tasklistId);
     return tl?.tasks.find((t) => t.id === taskId) || { title: taskId, inputType: "checkbox" };
   }
-
-  // SEED INFO -------------------------------------------
-  function seedDemoSubmissions({ days = 45, perDay = [0, 3], employees = [] } = {}) {
-    const names = employees.length ? employees : ["Employee A", "Employee B", "Employee C"];
-    const all = [];
-    const today = new Date();
-
-    // Pick tasklists once (current settings & location); if none, bail
-    const baseLists = tasklistsToday.length ? tasklistsToday : [];
-    if (!baseLists.length) { alert("No templates/time blocks to seed from."); return; }
-
-    const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-    const dayISO = (d) => new Date(d).toISOString().slice(0, 10);
-
-    for (let i = 0; i < days; i++) {
-      const d = new Date(today); d.setDate(today.getDate() - i);
-      const n = randInt(perDay[0], perDay[1]);
-      for (let j = 0; j < n; j++) {
-        const tl = baseLists[randInt(0, baseLists.length - 1)];
-        const tasks = tl.tasks.map(t => {
-          const statusRoll = Math.random();
-          const complete = statusRoll > 0.2; // 80% complete
-          const reviewRoll = Math.random();
-          const reviewStatus = complete ? (reviewRoll > 0.15 ? "Approved" : "Rework") : "Pending";
-          const base = {
-            taskId: t.id,
-            status: complete ? "Complete" : "Incomplete",
-            na: false,
-            photos: [],
-            note: (Math.random() > 0.7 ? "Checked" : ""),
-            reviewStatus
-          };
-          if (t.inputType === "number") {
-            const min = typeof t.min === "number" ? t.min : 0;
-            const max = typeof t.max === "number" ? t.max : min + 10;
-            base.value = randInt(min, max);
-          } else {
-            base.value = complete ? true : null;
-          }
-          return base;
-        });
-
-        const signed = names[randInt(0, names.length - 1)];
-        all.push({
-          id: `ci_${Date.now()}_${i}_${j}_${Math.random().toString(36).slice(2, 6)}`,
-          tasklistId: tl.id,
-          tasklistName: tl.name,
-          locationId: tl.locationId,
-          date: dayISO(d),
-          status: tasks.every(t => t.reviewStatus === "Approved") ? "Approved"
-            : tasks.some(t => t.reviewStatus === "Rework") ? "Rework" : "Pending",
-          signedBy: `PIN-${randInt(1000, 9999)}`,
-          submittedBy: signed,
-          signedAt: new Date(d).toISOString(),
-          tasks
-        });
-      }
-    }
-    setSubmissions(prev => [...all, ...prev]);
-    alert(`Seeded ${all.length} submissions over ${days} days.`);
-  }
-
 
   // Working state (per tasklist)
   const [working, setWorking] = useState(() =>
@@ -1375,8 +1278,8 @@ function AppInner() {
 
         <AppShell.Main>
           {!companyId ? (
-                <Center mih="60dvh"><Loader /></Center>
-               ) : (
+            <Center mih="60dvh"><Loader /></Center>
+          ) : (
             <Container size="xl">
               {mode === "employee" && (
                 <EmployeeView
@@ -1407,8 +1310,8 @@ function AppInner() {
               {mode === "admin" && (
                 <div style={{ paddingInline: "1px", paddingTop: 0, paddingBottom: "16px" }}>
                   <AdminView
-                    tasklists={MOCK_TASKLISTS}
                     companyId={company.id}
+                    tasklists={tasklistsToday}
                     onReloadChecklists={loadChecklists}
                     submissions={submissions}
                     onBrandColorChange={() => { }}
@@ -1430,77 +1333,7 @@ function AppInner() {
 }
 
 
-
-import Landing from "./marketing/Landing.jsx";
-import AuthShell from "./marketing/AuthShell.jsx";
-import OnboardingWizard from "./marketing/OnboardingWizard.jsx";
-
 export default function App() {
-  const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  // track auth session
-  useEffect(() => {
-    let unsub;
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const sub = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
-    unsub = () => sub.data.subscription.unsubscribe();
-    return () => { unsub && unsub(); };
-  }, []);
-
-  // load profile for current user
-  useEffect(() => {
-    async function loadProfile() {
-      if (!session) { setProfile(null); setLoading(false); return; }
-      const { data, error } = await supabase
-        .from("profile")
-        .select("*")
-        .eq("id", session.user.id)
-        .single();
-      setProfile(error ? null : data);
-      setLoading(false);
-    }
-    loadProfile();
-  }, [session]);
-
-  if (loading) return null;
-
-  // Logged out → Landing + Auth
-  if (!session) {
-    return (
-      <MantineProvider>
-        <AppShell withBorder={false}>
-          <AppShell.Main>
-            <AuthShell>
-              <Landing />
-            </AuthShell>
-          </AppShell.Main>
-        </AppShell>
-      </MantineProvider>
-    );
-  }
-
-  // Logged in but no company yet → Onboarding (creates company, location, mirror app_user)
-  if (session && !profile) return null;
-
-  if (!profile?.company_id) {
-    return (
-      <MantineProvider>
-        <OnboardingWizard
-          onDone={async () => {
-            const { data } = await supabase
-              .from("profile")
-              .select("*")
-              .eq("id", session.user.id)
-              .single();
-            setProfile(data);
-          }}
-        />
-      </MantineProvider>
-    );
-  }
-
   // Fully in the app
   return (
     <MantineProvider>

@@ -175,7 +175,6 @@ const toUiTemplate = (r) => ({
 
 // -----------------------------
 // Time blocks (global to company or global table?)
-// If time_block is global (no company_id), leave as-is. If it's per-company, add filter here.
 // -----------------------------
 export async function listTimeBlocks(companyId) {
   const cid = companyId || (await getMyCompanyId());
@@ -187,13 +186,31 @@ export async function listTimeBlocks(companyId) {
   if (error) throw error;
   return data.map(toUiTimeBlock);
 }
-export async function upsertTimeBlock(tbUi) {
-  const payload = await toDbTimeBlock(tbUi);
-  const { error } = await supabase
-    .from("time_block")
-    .upsert(payload, { onConflict: "company_id,id" }); // composite key
-  if (error) throw error;
+// queries.js
+export async function upsertTimeBlock(tb, companyId) {
+  // strip empty id so DB can use default
+  const row = {
+    id: tb.id || undefined,         // <— important
+    company_id: companyId,          // <— required (RLS/NOT NULL)
+    name: tb.name,                // <— use label, not name
+    start_time: tb.start,
+    end_time: tb.end,
+  };
+
+  const { data, error } = await supabase
+    .from('time_block')
+    .upsert(row, { onConflict: 'id' })  // or 'company_id,label' if you added that unique index
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('upsertTimeBlock error:', error); // helps surface the exact reason
+    throw error;
+  }
+  return data;
 }
+
+
 export async function removeTimeBlock(id) {
   const { error } = await supabase.from("time_block").delete().eq("id", id);
   if (error) throw error;

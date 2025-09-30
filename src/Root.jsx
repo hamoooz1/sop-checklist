@@ -5,10 +5,12 @@ import { MantineProvider, AppShell, Center, Loader } from "@mantine/core";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";                   // your existing app (AppInner inside)
 import MarketingApp from "./marketing/MarketingApp.jsx"; // new marketing router
-
+import OnboardingWizard from "./marketing/OnboardingWizard.jsx";
 export default function Root() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -30,6 +32,24 @@ export default function Root() {
     };
   }, []);
 
+  // Load profile only when we have a session
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!session) { setProfile(null); return; }
+      setProfileLoading(true);
+      const { data, error } = await supabase
+        .from("profile")
+        .select("*")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      if (!alive) return;
+      setProfile(error ? null : data);
+      setProfileLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [session]);
+
   if (loading) {
     return (
       <MantineProvider>
@@ -42,10 +62,34 @@ export default function Root() {
     );
   }
 
-  // If logged in => show the app. If not => show marketing site router.
   return (
     <BrowserRouter>
-      {session ? <App /> : <MarketingApp />}
+      {!session ? (
+        <MarketingApp />
+      ) : profileLoading ? (
+        <MantineProvider>
+          <AppShell padding="md">
+            <AppShell.Main>
+              <Center mih="60dvh"><Loader /></Center>
+            </AppShell.Main>
+          </AppShell>
+        </MantineProvider>
+      ) : !profile?.company_id ? (
+        <MantineProvider>
+          <OnboardingWizard
+            onDone={async () => {
+              const { data } = await supabase
+                .from("profile")
+                .select("*")
+                .eq("id", session.user.id)
+                .single();
+              setProfile(data);
+            }}
+          />
+        </MantineProvider>
+      ) : (
+        <App />
+      )}
     </BrowserRouter>
   );
 }

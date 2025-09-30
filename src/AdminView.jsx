@@ -16,7 +16,7 @@ import {
   listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
 } from "./queries.js";
 
-export default function AdminView({ companyId, refreshHeaderData, refreshCompanySettings }) {
+export default function AdminView({ companyId, refreshHeaderData, refreshCompanySettings, onReloadChecklists, }) {
 
   const [view, setView] = useState("company");
   const [draft, setDraft] = useState({
@@ -228,7 +228,14 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
           {view === "notifications" && <NotificationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "security" && <SecurityPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
           {view === "branding" && <BrandingPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "checklists" && <ChecklistsPane locations={locations} settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
+          {view === "checklists" && <ChecklistsPane
+            companyId={companyId}
+            locations={locations}
+            settings={draft}
+            setSettings={setDraft}
+            onSave={saveDraftToApp}
+            onReloadChecklists={refreshHeaderData}
+          />}
           {view === "data" && (
             <DataPane
               settings={draft}
@@ -623,7 +630,7 @@ function PoliciesPane({ settings, setSettings, onSave }) {
 }
 
 
-function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, locations }) {
+function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, locations, companyId }) {
   const stores = settings.checklists || { timeBlocks: [], templates: [], overrides: [] };
 
   // Local UI state
@@ -655,12 +662,15 @@ function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, loc
     }));
 
   const load = useCallback(async () => {
-    const [tbs, tpls] = await Promise.all([listTimeBlocks(), listTasklistTemplates()]);
+    const [tbs, tpls] = await Promise.all([
+      listTimeBlocks(companyId),
+      listTasklistTemplates(companyId),
+    ]);
     setTimeBlocks(tbs); setTemplates(tpls);
     // keep Admin draft in sync ONLY for displaying lists in this pane (still not the source of truth)
     setSettings(prev => ({ ...prev, checklists: { ...(prev.checklists || {}), timeBlocks: tbs, templates: tpls, overrides: prev.checklists?.overrides ?? [] } }));
     onReloadChecklists?.();
-  }, [setSettings, onReloadChecklists]);
+  }, [companyId, setSettings, onReloadChecklists]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -723,7 +733,10 @@ function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, loc
   // ---------------------------------------------------
 
   // Update and delete time block --------------
-  async function saveTimeBlock(tb) { await upsertTimeBlock(tb); await load(); }
+  async function saveTimeBlock(tb) {
+    await upsertTimeBlock(tb, companyId); // << pass companyId
+    await load();
+  }
 
   async function removeTimeBlockDb(id) { await removeTimeBlock(id); await load(); }
 
@@ -787,7 +800,6 @@ function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, loc
           <Table highlightOnHover>
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>ID</Table.Th>
                 <Table.Th>Name</Table.Th>
                 <Table.Th>Start</Table.Th>
                 <Table.Th>End</Table.Th>
@@ -797,8 +809,7 @@ function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, loc
             <Table.Tbody>
               {timeBlocks.map(tb => (
                 <Table.Tr key={tb.id}>
-                  <Table.Td><Badge variant="light">{tb.id}</Badge></Table.Td>
-                  <Table.Td>{tb.name}</Table.Td>
+                  <Table.Td><Badge variant="light">{tb.name}</Badge></Table.Td>
                   <Table.Td>{tb.start}</Table.Td>
                   <Table.Td>{tb.end}</Table.Td>
                   <Table.Td>
@@ -816,7 +827,6 @@ function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, loc
 
           <Modal opened={tbOpen} onClose={() => setTbOpen(false)} title="Time block" centered>
             <Stack>
-              <TextInput label="ID (e.g., open, mid, close)" value={tbDraft.id} onChange={(e) => setTbDraft({ ...tbDraft, id: e.target.value })} />
               <TextInput label="Name" value={tbDraft.name} onChange={(e) => setTbDraft({ ...tbDraft, name: e.target.value })} />
               <Group grow>
                 <TextInput label="Start (HH:MM)" value={tbDraft.start} onChange={(e) => setTbDraft({ ...tbDraft, start: e.target.value })} />
@@ -894,14 +904,11 @@ function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, loc
                   comboboxProps={{ withinPortal: true, zIndex: 11000 }}
                 />
               </Group>
-              <Select
+              <MultiSelect
                 label="Days of week (0=Sun...6=Sat)"
                 data={["0", "1", "2", "3", "4", "5", "6"].map(x => ({ value: x, label: x }))}
                 value={tplDraft.recurrence.map(String)}
                 onChange={(arr) => setTplDraft({ ...tplDraft, recurrence: (arr || []).map(x => Number(x)) })}
-                multiple
-                searchable
-                comboboxProps={{ withinPortal: true, zIndex: 11000 }}
               />
 
               <TaskEditor
