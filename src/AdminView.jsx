@@ -16,7 +16,7 @@ import {
   listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
 } from "./queries.js";
 
-export default function AdminView({ companyId, refreshHeaderData, refreshCompanySettings, onReloadChecklists, }) {
+export default function AdminView({ companyId, refreshHeaderData, refreshCompanySettings, onReloadChecklists }) {
 
   const [view, setView] = useState("company");
   const [draft, setDraft] = useState({
@@ -42,11 +42,6 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
     const rows = await listUsers(companyId);
     setUsers(Array.isArray(rows) ? rows : []);
   }, [companyId]);
-
-  const refreshCompany = useCallback(async () => {
-    const rows = await getCompany(companyId);
-    setCompany(rows.id || "");
-  }, []);
 
   // Initial fetch
   useEffect(() => {
@@ -234,7 +229,7 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
             settings={draft}
             setSettings={setDraft}
             onSave={saveDraftToApp}
-            onReloadChecklists={refreshHeaderData}
+            onReloadChecklists={onReloadChecklists}
           />}
           {view === "data" && (
             <DataPane

@@ -1033,6 +1033,7 @@ function AppInner() {
   }, [companyId]);
 
   useEffect(() => { loadChecklists(); }, [loadChecklists]);
+
   useEffect(() => {
     if (!companyId) return;
     const ch = supabase
@@ -1040,7 +1041,10 @@ function AppInner() {
       .on("postgres_changes", { event: "*", schema: "public", table: "time_block", filter: `company_id=eq.${companyId}` }, loadChecklists)
       .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_template", filter: `company_id=eq.${companyId}` }, loadChecklists)
       // If task rows don’t have company_id, add a trigger/column or skip this filter.
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_task" }, loadChecklists)
+      .on("postgres_changes", {
+        event: "*", schema: "public", table: "tasklist_task",
+        filter: `company_id=eq.${companyId}`
+      }, loadChecklists)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [companyId, loadChecklists]);
@@ -1094,19 +1098,37 @@ function AppInner() {
   const [pinModal, setPinModal] = useState({ open: false, onConfirm: null });
 
   useEffect(() => {
-    setWorking((prev) => {
-      const next = { ...prev };
-      tasklistsToday.forEach((tl) => {
-        if (!next[tl.id]) {
-          next[tl.id] = tl.tasks.map((t) => ({ taskId: t.id, status: "Incomplete", value: null, note: "", photos: [], na: false, reviewStatus: "Pending" }));
+  setWorking((prev) => {
+    const next = { ...prev };
+
+    tasklistsToday.forEach((tl) => {
+      const existing = next[tl.id] ?? [];
+      const byId = new Map(existing.map((s) => [s.taskId, s]));
+
+      // ensure there's a state row for every current task
+      const merged = tl.tasks.map((t) =>
+        byId.get(t.id) ?? {
+          taskId: t.id,
+          status: "Incomplete",
+          value: null,
+          note: "",
+          photos: [],
+          na: false,
+          reviewStatus: "Pending",
         }
-      });
-      Object.keys(next).forEach((k) => {
-        if (!tasklistsToday.find((tl) => tl.id === k)) delete next[k];
-      });
-      return next;
+      );
+
+      next[tl.id] = merged;
     });
-  }, [tasklistsToday]);
+
+    // drop tasklists that no longer exist today
+    Object.keys(next).forEach((k) => {
+      if (!tasklistsToday.find((tl) => tl.id === k)) delete next[k];
+    });
+
+    return next;
+  });
+}, [tasklistsToday]);
 
   function updateTaskState(tlId, taskId, patch) {
     setWorking((prev) => {
