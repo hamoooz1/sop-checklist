@@ -1,0 +1,38 @@
+:root {
+  --blob-a: radial-gradient(600px 600px at 10% 10%, rgba(139,92,246,.18), transparent 60%);
+  --blob-b: radial-gradient(600px 600px at 90% 20%, rgba(56,189,248,.18), transparent 60%);
+}
+
+.hero-bg { position: relative; overflow: hidden; border-bottom: 1px solid var(--mantine-color-default-border); }
+.hero-bg::before, .hero-bg::after {
+  content: ""; position: absolute; inset: -20%; z-index: -1; filter: blur(40px);
+  background: var(--blob-a);
+  animation: float 12s ease-in-out infinite;
+}
+.hero-bg::after { background: var(--blob-b); animation-duration: 16s; animation-delay: -4s; }
+
+@keyframes float { 0% { transform: translateY(0) } 50% { transform: translateY(-12px) } 100% { transform: translateY(0) } }
+
+.glass-header { backdrop-filter: saturate(160%) blur(10px); background: color-mix(in oklab, var(--mantine-color-body), transparent 20%); }
+.glass-panel { backdrop-filter: blur(8px); }
+
+.gradient-text { background: linear-gradient(90deg, var(--mantine-color-violet-5), var(--mantine-color-blue-5)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.gradient-text-acc { background: linear-gradient(90deg, var(--mantine-color-blue-5), var(--mantine-color-cyan-5)); -webkit-background-clip: text; color: transparent; }
+
+.feature-card { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.feature-card:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,.08); border-color: color-mix(in oklab, var(--mantine-color-violet-5), transparent 70%); }
+
+.hover-raise { transition: transform .2s ease, box-shadow .2s ease; }
+.hover-raise:hover { transform: translateY(-6px); box-shadow: 0 12px 28px rgba(0,0,0,.12); }
+
+.marquee-wrap { overflow: hidden; }
+.marquee { display: inline-block; white-space: nowrap; animation: scroll 22s linear infinite; opacity: .9; }
+.marquee:hover { animation-play-state: paused; }
+@keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+.button-glow { position: relative; isolation: isolate; }
+.button-glow::after { content: ""; position: absolute; inset: -2px; border-radius: inherit; z-index: -1; filter: blur(10px); opacity: .6; background: linear-gradient(90deg, var(--mantine-color-violet-5), var(--mantine-color-blue-5)); }
+
+.auth-visual { background: linear-gradient(135deg, color-mix(in oklab, var(--mantine-color-violet-1), transparent 60%), transparent),
+                       radial-gradient(800px 400px at 0% 0%, color-mix(in oklab, var(--mantine-color-blue-1), transparent 70%), transparent);
+}

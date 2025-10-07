@@ -78,7 +78,6 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
       .on("postgres_changes", { event: "*", schema: "public", table: "location" }, async () => { await refreshLocations(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "app_user", filter: `company_id=eq.${companyId}` }, async () => { await refreshUsers(); })
       .subscribe();
-
     return () => { supabase.removeChannel(ch); };
   }, [companyId, refreshLocations, refreshUsers]);
 

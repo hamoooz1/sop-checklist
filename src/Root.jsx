@@ -6,6 +6,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";                   // your existing app (AppInner inside)
 import MarketingApp from "./marketing/MarketingApp.jsx"; // new marketing router
 import OnboardingWizard from "./marketing/OnboardingWizard.jsx";
+
 export default function Root() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);

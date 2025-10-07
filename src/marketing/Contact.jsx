@@ -1,3 +1,4 @@
+//Contact.jsx
 import React, { useState } from "react";
 import { Container, Card, Text, TextInput, Textarea, Button, Group } from "@mantine/core";
 import { supabase } from "../lib/supabase";

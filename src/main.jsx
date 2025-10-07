@@ -2,7 +2,6 @@ import '@mantine/core/styles.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { MantineProvider, createTheme } from '@mantine/core';
-import App from './App.jsx';
 import Root from './Root.jsx';
 
 const theme = createTheme({
