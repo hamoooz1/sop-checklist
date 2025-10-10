@@ -37,7 +37,8 @@ import { useLocalStorage } from "@mantine/hooks";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
 import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates } from "./queries.js";
-
+import BugReport from "./components/BugReport.jsx";
+import { IconBug } from "@tabler/icons-react";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -1288,6 +1289,7 @@ function AppInner() {
                 data={locations.map((l) => ({ value: String(l.id), label: l.name }))}
                 w={200}
               />
+              <BugReport companyId={companyId} employeeId={currentEmployee} />
               <Button onClick={async () => {
                 await supabase.auth.signOut();
               }}>
