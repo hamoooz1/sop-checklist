@@ -1,32 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import AdminView from "./AdminView";
-import {
-  MantineProvider,
-  createTheme,
-  AppShell,
-  Container,
-  Group,
-  Button,
-  Select,
-  Card,
-  Text,
-  Badge,
-  Table,
-  Grid,
-  Stack,
-  NumberInput,
-  TextInput,
-  Modal,
-  ActionIcon,
-  ScrollArea,
-  FileButton,
-  Switch,
-  SegmentedControl,
-  rem,
-  Tabs,
-  Center,
-  Loader
-} from "@mantine/core";
+import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider } from "@mantine/core";
 
 import { supabase } from "./lib/supabase.js";
 import {
@@ -41,14 +15,11 @@ import {
   uploadEvidence,
   toPublicUrl,         // <-- add
 } from './lib/submissions';
-import Sidebar from "./components/Sidebar.jsx";
-import Topbar from "./components/Topbar.jsx";
-import { useLocalStorage } from "@mantine/hooks";
-import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
+import { useLocalStorage, useDisclosure } from "@mantine/hooks";
+import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload, IconMapPin, IconUser, IconLayoutGrid, IconLayoutList, IconBug, IconLogout, IconShieldHalf } from "@tabler/icons-react";
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
 import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates } from "./lib/queries.js";
 import BugReport from "./components/BugReport.jsx";
-import { IconBug } from "@tabler/icons-react";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -1157,7 +1128,12 @@ function AppInner() {
   const [employees, setEmployees] = useState([]);
   const [company, setCompany] = useState({ id: "", name: "", brandColor: "#0ea5e9", logo: null, timezone: "UTC" });
   const [checklists, setChecklists] = useState({ timeBlocks: [], templates: [], overrides: [] });
-
+  const ModeTabsText = [
+    { value: "employee", label: "Employee", icon: <IconUser size={14} /> },
+    { value: "manager", label: "Manager", icon: <IconShieldHalf size={14} /> },
+    { value: "admin", label: "Admin", icon: <IconLayoutGrid size={14} /> },
+  ];
+  const ModeTabsIcons = ModeTabsText.map(({ value, icon }) => ({ value, label: icon }));
 
   // GET Company from DB
   const loadCompany = useCallback(async () => {
@@ -1353,12 +1329,12 @@ function AppInner() {
     const tlToday = tasklistsToday.find(x => x.id === tasklistId);
     const metaToday = tlToday?.tasks?.find(t => t.id === taskId);
     if (metaToday) return metaToday;
-  
+
     // 2) any template in company (independent of location/recurrence)
     const tlAny = (checklists.templates || []).find(x => x.id === tasklistId);
     const metaAny = tlAny?.tasks?.find(t => t.id === taskId);
     if (metaAny) return metaAny;
-  
+
     // 3) fallback
     return { id: taskId, title: taskId, inputType: "checkbox" };
   }
@@ -1618,60 +1594,138 @@ function AppInner() {
   return (
     <MantineProvider theme={baseTheme} forceColorScheme={scheme}>
       <AppShell
-        header={{ height: 120 }}   // NEW: allow extra height when wrapping
+        header={{ height: 100 }}   // NEW: allow extra height when wrapping
         padding="md"
         withBorder={false}
         styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)" } }}
       >
         <AppShell.Header style={{ borderBottom: "1px solid var(--mantine-color-gray-3)" }}>
-          <Group h={64} px="md" justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
-            {/* left */}
-            <Group gap="sm">
-              {company.logo ? (
-                <img
-                  src={company.logo}
-                  alt="Logo"
-                  style={{ width: 28, height: 28, borderRadius: 8, objectFit: "cover" }}
-                />
-              ) : (
-                <div style={{ width: 28, height: 28, borderRadius: 8, background: company.brandColor }} />
-              )}
-              <Text fw={700}>{company.name}</Text>
-            </Group>
-            {/* right */}
-            <Group gap="xs" wrap="wrap">
-              <SegmentedControl
-                value={mode}
-                onChange={setMode}
-                data={[
-                  { value: "employee", label: "Employee" },
-                  { value: "manager", label: "Manager" },
-                  { value: "admin", label: "Admin" },
-                ]}
-              />
-              <Select
-                value={currentEmployee}
-                onChange={(u) => setCurrentEmployee(u)}
-                data={employees.map((l) => ({ value: String(l.id), label: l.display_name }))}
-                w={220}
-                placeholder="Select employee"
-              />
-              <Select
-                value={activeLocationId}
-                onChange={(v) => setActiveLocationId(v)}
-                data={locations.map((l) => ({ value: String(l.id), label: l.name }))}
-                w={200}
-              />
-              <BugReport companyId={companyId} employeeId={currentEmployee} />
-              <Button onClick={async () => {
-                await supabase.auth.signOut();
-              }}>
-                Logout
-              </Button>
-              <ThemeToggle scheme={scheme} setScheme={setScheme} />
-            </Group>
-          </Group>
+          {/** Mobile/Tablet Drawer state */}
+          {(() => {
+            const [opened, { open, close, toggle }] = useDisclosure(false);
+            return (
+              <>
+                {/* Top bar */}
+                <Group h={56} px="sm" justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
+                  {/* Left: brand */}
+                  <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+                    <Burger opened={opened} onClick={toggle} aria-label="Open menu" hiddenFrom="sm" />
+                    {company.logo ? (
+                      <img src={company.logo} alt="Logo" style={{ width: 28, height: 28, borderRadius: 8, objectFit: "cover" }} />
+                    ) : (
+                      <div style={{ width: 28, height: 28, borderRadius: 8, background: company.brandColor }} />
+                    )}
+                    {/* Hide long name on phones, show on ≥sm */}
+                    <Text fw={700} truncate visibleFrom="sm">{company.name}</Text>
+                  </Group>
+
+                  {/* Right: compact controls */}
+                  <Group gap="xs" wrap="nowrap">
+                    {/* Mode tabs: icons on mobile, text on ≥md */}
+                    <SegmentedControl
+                      value={mode}
+                      onChange={setMode}
+                      data={ModeTabsIcons}
+                      hiddenFrom="sm"
+                    />
+                    <SegmentedControl
+                      value={mode}
+                      onChange={setMode}
+                      data={ModeTabsText}
+                      visibleFrom="sm"
+                      styles={{ root: { maxWidth: 360 } }}
+                    />
+
+                    {/* Employee + Location quick buttons (open drawer on mobile) */}
+                    <ActionIcon variant="default" title="Employee / Location" onClick={open} hiddenFrom="sm">
+                      <IconUser size={16} />
+                    </ActionIcon>
+                    <ActionIcon variant="default" title="Theme" onClick={() => setScheme(scheme === "dark" ? "light" : "dark")} hiddenFrom="sm">
+                      {scheme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
+                    </ActionIcon>
+
+                    {/* Full controls on ≥sm */}
+                    <Group gap="xs" visibleFrom="sm" wrap="nowrap">
+                      <Select
+                        value={currentEmployee}
+                        onChange={setCurrentEmployee}
+                        data={employees.map((l) => ({ value: String(l.id), label: l.display_name }))}
+                        w={200}
+                        leftSection={<IconUser size={14} />}
+                        comboboxProps={{ withinPortal: true }}
+                        placeholder="Employee"
+                        searchable
+                      />
+                      <Select
+                        value={activeLocationId}
+                        onChange={setActiveLocationId}
+                        data={locations.map((l) => ({ value: String(l.id), label: l.name }))}
+                        w={180}
+                        leftSection={<IconMapPin size={14} />}
+                        comboboxProps={{ withinPortal: true }}
+                        placeholder="Location"
+                        searchable
+                      />
+                      <BugReport companyId={companyId} employeeId={currentEmployee} />
+                      <Button
+                        onClick={async () => { await supabase.auth.signOut(); }}
+                        leftSection={<IconLogout size={16} />}
+                        variant="default"
+                      >
+                        Logout
+                      </Button>
+                      <ThemeToggle scheme={scheme} setScheme={setScheme} />
+                    </Group>
+                  </Group>
+                </Group>
+
+                {/* Drawer for mobile controls */}
+                <Drawer opened={opened} onClose={close} title={company.name || "Menu"} padding="md" size="100%" hiddenFrom="sm">
+                  <Stack gap="md">
+                    <SegmentedControl value={mode} onChange={setMode} data={ModeTabsText} />
+                    <Divider label="Context" />
+                    <Select
+                      label="Employee"
+                      value={currentEmployee}
+                      onChange={setCurrentEmployee}
+                      data={employees.map((l) => ({ value: String(l.id), label: l.display_name }))}
+                      leftSection={<IconUser size={14} />}
+                      searchable
+                      comboboxProps={{ withinPortal: true }}
+                    />
+                    <Select
+                      label="Location"
+                      value={activeLocationId}
+                      onChange={setActiveLocationId}
+                      data={locations.map((l) => ({ value: String(l.id), label: l.name }))}
+                      leftSection={<IconMapPin size={14} />}
+                      searchable
+                      comboboxProps={{ withinPortal: true }}
+                    />
+                    <Divider />
+                    <Group justify="space-between">
+                      <BugReport companyId={companyId} employeeId={currentEmployee} />
+                      <Group>
+                        <ActionIcon
+                          variant="default"
+                          onClick={() => setScheme(scheme === "dark" ? "light" : "dark")}
+                          title="Toggle theme"
+                        >
+                          {scheme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
+                        </ActionIcon>
+                        <Button leftSection={<IconLogout size={16} />} variant="light"
+                          onClick={async () => { await supabase.auth.signOut(); }}>
+                          Logout
+                        </Button>
+                      </Group>
+                    </Group>
+                  </Stack>
+                </Drawer>
+              </>
+            );
+          })()}
         </AppShell.Header>
+
 
         <AppShell.Main>
           {!companyId ? (
