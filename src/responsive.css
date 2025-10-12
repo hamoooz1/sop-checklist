@@ -29,9 +29,9 @@ html, body, #root { height: 100%; }
 }
 
 :root.theme-dark {
-  --bg: #0b1020;
-  --surface: #0f172a;
-  --surface-soft: #0b1222;
+  --bg: #1a1b1e;
+  --surface: #1a1b1e;
+  --surface-soft: #1a1b1e;
   --text: #e2e8f0;
   --muted: #94a3b8;
   --border: #1f2937;

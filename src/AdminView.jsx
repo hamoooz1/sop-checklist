@@ -14,7 +14,7 @@ import {
   listUsers, createUser, updateUser, deleteUser, uploadCompanyLogo,
   listTimeBlocks, upsertTimeBlock, removeTimeBlock,
   listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
-} from "./queries.js";
+} from "./lib/queries.js";
 
 export default function AdminView({ companyId, refreshHeaderData, refreshCompanySettings, onReloadChecklists }) {
 

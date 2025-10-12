@@ -32,17 +32,68 @@ import { supabase } from "./lib/supabase.js";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
-
+import {
+  fetchSubmissionAndTasks,
+  validatePin,
+  findOrCreateSubmission,
+  upsertSubmissionTask,
+  todayISOInTz,
+  uploadEvidence,
+  toPublicUrl,         // <-- add
+} from './lib/submissions';
+import Sidebar from "./components/Sidebar.jsx";
+import Topbar from "./components/Topbar.jsx";
 import { useLocalStorage } from "@mantine/hooks";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload } from "@tabler/icons-react";
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
-import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates } from "./queries.js";
+import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates } from "./lib/queries.js";
 import BugReport from "./components/BugReport.jsx";
 import { IconBug } from "@tabler/icons-react";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 /** ---------------------- Utils ---------------------- */
+
+function PhotoThumbs({ urls = [], size = 64, title = "Photo" }) {
+  const [open, setOpen] = React.useState(false);
+  const [src, setSrc] = React.useState(null);
+
+  return (
+    <>
+      <Group gap="xs" wrap="wrap">
+        {urls.map((u, i) => (
+          <img
+            key={i}
+            src={u}
+            alt={`evidence-${i}`}
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              e.currentTarget.style.opacity = '0.35';
+              e.currentTarget.title = `Failed to load\n${u}`;
+            }}
+            style={{
+              width: size, height: size, objectFit: 'cover',
+              borderRadius: 6, border: '1px solid var(--mantine-color-gray-3)',
+              cursor: 'pointer'
+            }}
+            loading="lazy"
+            onClick={() => { setSrc(u); setOpen(true); }}
+          />
+        ))}
+      </Group>
+
+      <Modal opened={open} onClose={() => setOpen(false)} title={title} centered size="auto" styles={{ body: { padding: 0 } }}>
+        {src && (
+          <img
+            src={src}
+            alt="evidence-full"
+            style={{ maxWidth: '90vw', maxHeight: '80vh', display: 'block' }}
+          />
+        )}
+      </Modal>
+    </>
+  );
+}
 
 function pct(n, d) { return d ? Math.round((n / d) * 100) : 0; }
 function canTaskBeCompleted(task, state) {
@@ -58,10 +109,6 @@ function canTaskBeCompleted(task, state) {
     if (typeof task.max === "number" && v > task.max) return false;
   }
   return true;
-}
-function getTaskMeta(tasklistId, taskId) {
-  const tl = getTasklistById(tasklistId);
-  return tl?.tasks.find((x) => x.id === taskId) || { title: taskId, inputType: "checkbox" };
 }
 
 // --------- Checklist resolution (templates + ad-hoc) ----------
@@ -86,76 +133,6 @@ function getTimeBlockLabelFromLists(blocks, id) {
   return b ? `${b.name} (${b.start}–${b.end})` : id;
 }
 
-
-/**
- * settings: full settings from context
- * locationId: active location
- * dateISO: "YYYY-MM-DD"
- * returns array of tasklists for that date/location
- */
-function resolveTasklistsForDay(settings, locationId, dateISO) {
-  const cl = settings.checklists || { timeBlocks: [], templates: [], overrides: [] };
-  const tz = settings.company?.timezone || "UTC";
-  const dow = weekdayIndexFromISO(dateISO, tz);
-
-  const tMap = Object.fromEntries((cl.timeBlocks || []).map(tb => [tb.id, tb]));
-
-  const templates = (cl.templates || []).filter(tpl =>
-    (tpl.active !== false) &&
-    tpl.locationId === locationId &&
-    Array.isArray(tpl.recurrence) &&
-    tpl.recurrence.includes(dow)
-  );
-
-  const overrides = (cl.overrides || []).filter(ovr =>
-    ovr.locationId === locationId &&
-    ovr.date === dateISO
-  );
-
-  const byTB = {};
-  for (const ovr of overrides) {
-    if (!byTB[ovr.timeBlockId]) byTB[ovr.timeBlockId] = [];
-    byTB[ovr.timeBlockId].push(...(ovr.tasks || []));
-  }
-
-  const tasklists = templates.map((tpl) => {
-    const extra = byTB[tpl.timeBlockId] || [];
-    const mergedTasks = [...(tpl.tasks || []), ...extra].map(t => ({
-      id: t.id ?? `t_${Math.random().toString(36).slice(2, 8)}`,
-      title: t.title || "Task",
-      category: t.category || "",
-      inputType: t.inputType || "checkbox",
-      min: typeof t.min === "number" ? t.min : null,
-      max: typeof t.max === "number" ? t.max : null,
-      photoRequired: !!t.photoRequired,
-      noteRequired: !!t.noteRequired,
-      allowNA: t.allowNA !== false,
-      priority: typeof t.priority === "number" ? t.priority : 3
-    }));
-
-    return {
-      id: tpl.id,
-      locationId: tpl.locationId,
-      name: tpl.name,
-      timeBlockId: tpl.timeBlockId,
-      recurrence: tpl.recurrence || [],
-      requiresApproval: tpl.requiresApproval !== false,    // default true
-      signoffMethod: tpl.signoffMethod || "PIN",
-      tasks: mergedTasks
-    };
-  });
-
-  // Nice sorting by time block start time if available
-  tasklists.sort((a, b) => {
-    const A = tMap[a.timeBlockId]?.start || "00:00";
-    const B = tMap[b.timeBlockId]?.start || "00:00";
-    return A.localeCompare(B);
-  });
-
-  return tasklists;
-}
-
-
 /** ---------------------- Theme toggle (prop-driven) ---------------------- */
 function ThemeToggle({ scheme, setScheme }) {
   const next = scheme === "dark" ? "light" : "dark";
@@ -175,14 +152,37 @@ function ThemeToggle({ scheme, setScheme }) {
 
 /** ---------------------- Pin Modal ---------------------- */
 function PinDialog({ opened, onClose, onConfirm }) {
-  const [pin, setPin] = useState("");
+  const [pin, setPin] = useState('');
+
+  // Clear when the modal opens
+  useEffect(() => {
+    if (opened) setPin('');
+  }, [opened]);
+
+  const handleClose = () => {
+    setPin('');
+    onClose?.();
+  };
+
+  const handleConfirm = () => {
+    const p = pin;
+    setPin('');              // clear immediately so it never “sticks”
+    onConfirm?.(p);
+  };
+
   return (
-    <Modal zIndex={1000} opened={opened} onClose={onClose} title="Enter PIN" centered withinPortal transitionProps={{ duration: 0 }} overlayProps={{ opacity: 0.25, blur: 2 }}>
+    <Modal opened={opened} onClose={handleClose} title="Enter PIN" centered>
       <Stack gap="sm">
-        <TextInput type="password" placeholder="••••" value={pin} onChange={(e) => setPin(e.target.value)} autoFocus />
+        <TextInput
+          type="password"
+          placeholder="••••"
+          value={pin}
+          onChange={(e) => setPin(e.currentTarget.value)}
+          autoFocus
+        />
         <Group justify="flex-end">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => pin && onConfirm && onConfirm(pin)}>Confirm</Button>
+          <Button variant="default" onClick={handleClose}>Cancel</Button>
+          <Button onClick={handleConfirm}>Confirm</Button>
         </Group>
       </Stack>
     </Modal>
@@ -192,15 +192,20 @@ function PinDialog({ opened, onClose, onConfirm }) {
 /** ---------------------- Evidence ---------------------- */
 function EvidenceRow({ state }) {
   if (!state) return null;
+  const paths = Array.isArray(state.photos) ? state.photos : [];
+  const urls = paths
+    .filter(p => typeof p === 'string' && p.includes('/')) // guard against "file.name"
+    .map(p => toPublicUrl(supabase, 'evidence', p));
   return (
-    <Group gap="xs" mt="xs" wrap="wrap">
-      {(state.photos || []).map((p, i) => (
-        <Badge key={i} variant="light" leftSection={<IconPhoto size={14} />}>{p}</Badge>
-      ))}
-      {state.note ? <Badge variant="light">Note: {state.note}</Badge> : null}
-      {state.value !== null && state.value !== undefined ? <Badge variant="light">Value: {state.value}</Badge> : null}
-      {state.na ? <Badge variant="light" color="gray">N/A</Badge> : null}
-    </Group>
+    <Stack gap="xs" mt="xs">
+      {urls.length > 0 && <PhotoThumbs urls={urls} size={56} title="Evidence" />}
+
+      <Group gap="xs" wrap="wrap">
+        {state.note ? <Badge variant="light">Note: {state.note}</Badge> : null}
+        {(state.value ?? null) !== null ? <Badge variant="light">Value: {state.value}</Badge> : null}
+        {state.na ? <Badge variant="light" color="gray">N/A</Badge> : null}
+      </Group>
+    </Stack>
   );
 }
 
@@ -215,7 +220,8 @@ function EmployeeView({
   submissions,
   setSubmissions,
   setWorking,
-  checklists
+  checklists,
+  company
 }) {
   return (
     <Stack gap="md">
@@ -380,6 +386,7 @@ function EmployeeView({
                   const tl = tasklists.find((x) => x.id === tasklistId);
                   return tl?.tasks.find((t) => t.id === taskId) || { title: taskId, inputType: "checkbox" };
                 }}
+                company={company}
               />
             ))
         )}
@@ -421,7 +428,7 @@ function resolveTasklistsForDayFromLists({ timeBlocks, templates }, locationId, 
 
 
 
-function EmployeeReworkCard({ s, setSubmissions, setWorking, getTaskMeta }) {
+function EmployeeReworkCard({ s, setSubmissions, setWorking, getTaskMeta, company }) {
   function updateSubmissionTask(submissionId, taskId, patch) {
     setSubmissions((prev) =>
       prev.map((sx) => {
@@ -511,7 +518,44 @@ function EmployeeReworkCard({ s, setSubmissions, setWorking, getTaskMeta }) {
                   <Table.Td className="hide-sm">
                     <Group gap="xs" wrap="wrap">
                       <FileButton
-                        onChange={(file) => file && updateSubmissionTask(s.id, t.taskId, (prev) => ({ photos: [...(prev.photos || []), file.name] }))}
+                        onChange={async (file) => {
+                          if (!file) return;
+                          try {
+                            const path = await uploadEvidence({
+                              supabase,
+                              bucket: 'evidence',
+                              companyId: s.companyId ?? company.id,     // ensure you pass company.id somehow
+                              tasklistId: s.tasklistId,
+                              taskId: t.taskId,
+                              file
+                            });
+                            // persist to DB (merge existing row safely)
+                            const { data: row } = await supabase
+                              .from('submission_task')
+                              .select('status, review_status, na, value, note, photos')
+                              .eq('submission_id', s.id)
+                              .eq('task_id', t.taskId)
+                              .maybeSingle();
+                            await upsertSubmissionTask({
+                              supabase,
+                              submissionId: s.id,
+                              taskId: t.taskId,
+                              payload: {
+                                status: row?.status ?? 'Incomplete',
+                                review_status: row?.review_status ?? 'Pending',
+                                na: !!row?.na,
+                                value: row?.value ?? null,
+                                note: row?.note ?? null,
+                                photos: [...(row?.photos || []), path],
+                              },
+                            });
+                            // local mirror
+                            updateSubmissionTask(s.id, t.taskId, (prev) => ({ photos: [...(prev.photos || []), path] }));
+                          } catch (e) {
+                            console.error(e);
+                            alert('Upload failed');
+                          }
+                        }}
                         accept="image/*"
                       >
                         {(props) => <Button variant="default" leftSection={<IconUpload size={16} />} {...props}>Upload</Button>}
@@ -565,10 +609,45 @@ function ManagerView({
   submissions,
   setSubmissions,
   setWorking,
-  getTaskMeta,
-  settings,
-  locations
+  company,
+  locations,
+  employees,
+  getTaskMeta
 }) {
+  async function fetchManagerSubmissions({ supabase, companyId, from, to, locationId }) {
+    let q = supabase
+      .from('submission')
+      .select(`
+        id, tasklist_id, location_id, date, status, signed_by, submitted_by,
+         submission_task:submission_task (
+   task_id, status, review_status, na, value, note, photos, rework_count, review_note, submitted_by
+ )
+      `)
+      .eq('company_id', companyId)
+      .gte('date', from)
+      .lte('date', to);
+
+    if (locationId) q = q.eq('location_id', locationId);
+
+    const { data, error } = await q;
+    if (error) throw error;
+    return data || [];
+  }
+
+  const [reworkNote, setReworkNote] = useState("");
+
+  const userById = useMemo(() => {
+    const m = new Map();
+    (employees || []).forEach(u => m.set(String(u.id), u));
+    return m;
+  }, [employees]);
+
+  const nameForUserId = (uid) => {
+    const u = uid ? userById.get(String(uid)) : null;
+    return u?.display_name || uid || "—";
+  };
+
+
   // ---------- Filters ----------
   const [filters, setFilters] = useState({
     from: "",
@@ -583,9 +662,7 @@ function ManagerView({
     locations.map((l) => ({ value: String(l.id), label: l.name }))
   );
   const employeeOptions = [{ value: "", label: "All employees" }].concat(
-    Array.from(
-      new Set(submissions.map((s) => s.submittedBy || s.signedBy || "Unknown"))
-    ).map((e) => ({ value: e, label: e }))
+    (employees || []).map(u => ({ value: String(u.id), label: u.display_name }))
   );
   const categoryOptions = [{ value: "", label: "All categories" }].concat(
     Array.from(
@@ -602,8 +679,9 @@ function ManagerView({
   function matchesFilters(s) {
     if (filters.locationId && s.locationId !== filters.locationId) return false;
     if (filters.employee) {
-      const who = s.submittedBy || s.signedBy || "Unknown";
-      if (who !== filters.employee) return false;
+      const submissionSubmitterOk = String(s.submittedBy || "") === String(filters.employee);
+      const anyTaskSubmitterOk = s.tasks?.some(t => String(t.submittedBy || "") === String(filters.employee));
+      if (!submissionSubmitterOk && !anyTaskSubmitterOk) return false;
     }
     if (filters.status && s.status !== filters.status) return false;
     if (filters.from && s.date < filters.from) return false;
@@ -664,70 +742,151 @@ function ManagerView({
       return { ...prev, [subId]: cur };
     });
   }
-  function applyReview(subId, review, note) {
-    setSubmissions((prev) =>
-      prev.map((s) => {
-        if (s.id !== subId) return s;
 
-        // If nothing selected, treat as "all" (used by Approve ALL button)
-        const sel = selection[s.id] || new Set(s.tasks.map(t => t.taskId));
-
-        const tasks = s.tasks.map((t) => {
-          if (!sel.has(t.taskId)) return t;
-
-          // Update review status in-place; do NOT create any new task rows
-          const base = {
-            ...t,
-            reviewStatus: review,
-            // stamp/append a rework reason (keep last for quick view, keep history for audit)
-            reviewNote: review === "Rework" ? (note || t.reviewNote || "") : t.reviewNote,
-            reworkHistory: Array.isArray(t.reworkHistory) ? t.reworkHistory : [],
-          };
-
-          if (review === "Rework") {
-            const count = (t.reworkCount ?? 0) + 1;
-            base.reworkCount = count;
-            base.wasReworked = true;
-            base.reworkHistory = [
-              ...base.reworkHistory,
-              { at: new Date().toISOString(), note: note || "" }
-            ];
-            // employee must fix; keep employee status as-is (Complete/Incomplete) until they resubmit
-          }
-
-          if (review === "Approved") {
-            // final approval – still the SAME task instance
-            // (no extra bookkeeping needed here)
-          }
-
-          return base;
-        });
-
-        // recompute submission holistically
-        const hasRework = tasks.some((t) => t.reviewStatus === "Rework");
-        const allApproved = tasks.length > 0 && tasks.every((t) => t.reviewStatus === "Approved");
-        const status = hasRework ? "Rework" : (allApproved ? "Approved" : "Pending");
-
-        // mirror back into "working" so the employee sees state
-        setWorking((prevW) => {
-          const list = prevW[s.tasklistId];
-          if (!list) return prevW;
-          const nextList = list.map((wt) => {
-            if (!sel.has(wt.taskId)) return wt;
-            if (review === "Approved") return { ...wt, status: "Complete", reviewStatus: "Approved" };
-            if (review === "Rework") return { ...wt, status: "Incomplete", reviewStatus: "Rework" };
-            return { ...wt, reviewStatus: review };
-          });
-          return { ...prevW, [s.tasklistId]: nextList };
-        });
-
-        return { ...s, tasks, status };
-      })
-    );
-
-    setSelection((prev) => ({ ...prev, [subId]: new Set() }));
+  async function markTasksRework({ supabase, submissionId, taskIds, note }) {
+    const { error } = await supabase.rpc('mark_rework', {
+      p_submission_id: submissionId,
+      p_task_ids: taskIds,
+      p_note: note ?? null
+    });
+    if (error) throw error;
   }
 
+  async function markTasksApproved({ supabase, submissionId, taskIds }) {
+    const { error } = await supabase
+      .from('submission_task')
+      .update({ review_status: 'Approved' })
+      .eq('submission_id', submissionId)
+      .in('task_id', taskIds);
+    if (error) throw error;
+  }
+
+  async function applyReview(subId, review, note) {
+    // 1) Resolve which tasks are selected (default to all tasks in the submission)
+    const sel = selection[subId];
+    const sub = submissions.find(x => x.id === subId);
+    if (!sub) return;
+
+    const taskIds = (sel && sel.size > 0)
+      ? Array.from(sel)
+      : sub.tasks.map(t => t.taskId);
+
+    if (!taskIds.length) return;
+
+    try {
+      // 2) Persist to DB first
+      if (review === 'Rework') {
+        await markTasksRework({ supabase, submissionId: subId, taskIds, note });
+      } else if (review === 'Approved') {
+        await markTasksApproved({ supabase, submissionId: subId, taskIds });
+      } else {
+        throw new Error('Unsupported review value');
+      }
+
+      // 3) Local mirror (keeps UI snappy)
+      setSubmissions(prev =>
+        prev.map(s => {
+          if (s.id !== subId) return s;
+
+          const tasks = s.tasks.map(t => {
+            if (!taskIds.includes(t.taskId)) return t;
+
+            if (review === 'Rework') {
+              return {
+                ...t,
+                reviewStatus: 'Rework',
+                reviewNote: note || t.reviewNote || '',
+                reworkCount: (t.reworkCount ?? 0) + 1,
+                wasReworked: true,
+              };
+            }
+            // Approved
+            return { ...t, reviewStatus: 'Approved' };
+          });
+
+          // Recompute submission aggregate status
+          const hasRework = tasks.some(t => t.reviewStatus === 'Rework');
+          const allApproved = tasks.length > 0 && tasks.every(t => t.reviewStatus === 'Approved');
+          const status = hasRework ? 'Rework' : (allApproved ? 'Approved' : 'Pending');
+
+          // Reflect to employee working state so they see up-to-date review chips
+          setWorking(prevW => {
+            const list = prevW[s.tasklistId];
+            if (!list) return prevW;
+
+            const nextList = list.map(wt => {
+              if (!taskIds.includes(wt.taskId)) return wt;
+              if (review === 'Approved') return { ...wt, status: 'Complete', reviewStatus: 'Approved' };
+              if (review === 'Rework') return { ...wt, status: 'Incomplete', reviewStatus: 'Rework' };
+              return { ...wt, reviewStatus: review };
+            });
+
+            return { ...prevW, [s.tasklistId]: nextList };
+          });
+
+          return { ...s, tasks, status };
+        })
+      );
+
+      // 4) Clear selection for this submission card
+      setSelection(prev => ({ ...prev, [subId]: new Set() }));
+
+      // 5) (Optional) Re-fetch from DB if you prefer authoritative state
+      const fresh = await fetchManagerSubmissions({
+        supabase,
+        companyId: company.id,
+        from: filters.from || todayISOInTz(company.timezone || 'UTC'),
+        to: filters.to || todayISOInTz(company.timezone || 'UTC'),
+        locationId: filters.locationId || null
+      });
+      // setSubmissions(fresh.map(/* map to view model */));
+    } catch (e) {
+      console.error(e);
+      alert(e.message || 'Failed to update review status');
+    }
+  }
+
+  useEffect(() => {
+    if (!company?.id) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await fetchManagerSubmissions({
+          supabase,
+          companyId: company.id,
+          from: filters.from || todayISOInTz(company.timezone || 'UTC'),
+          to: filters.to || todayISOInTz(company.timezone || 'UTC'),
+          locationId: filters.locationId || null
+        });
+        if (!cancelled) setSubmissions(list.map(s => ({
+          id: s.id,
+          tasklistId: s.tasklist_id,
+          locationId: s.location_id,
+          date: s.date,
+          status: s.status,
+          signedBy: s.signed_by,
+          submittedBy: s.submitted_by,
+          tasks: (s.submission_task || []).map(t => ({
+            taskId: t.task_id,
+            status: t.status,
+            reviewStatus: t.review_status,
+            na: t.na,
+            value: t.value,
+            note: t.note,
+            photos: t.photos || [],
+            reworkCount: t.rework_count,
+            reviewNote: t.review_note,
+            submittedBy: t.submitted_by,
+          })),
+        })));
+      } catch (e) {
+        console.error(e);
+        // show a toast if you want
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [supabase, company.id, company.timezone, filters.from, filters.to, filters.locationId]);
 
   return (
     <Stack gap="md">
@@ -812,7 +971,7 @@ function ManagerView({
                 <div>
                   <Text fw={600}>{s.tasklistName}</Text>
                   <Text c="dimmed" fz="sm">
-                    {s.date} • {locations.find((l) => String(l.id) === String(s.locationId))?.name || s.locationId} • By: {s.submittedBy || s.signedBy}
+                    {s.date} • {locations.find((l) => String(l.id) === String(s.locationId))?.name || s.locationId} • By: {nameForUserId(s.submittedBy) || s.signedBy || "—"}
                   </Text>
                 </div>
                 <Badge variant="light" color={s.status === "Approved" ? "green" : s.status === "Rework" ? "yellow" : "gray"}>
@@ -838,6 +997,7 @@ function ManagerView({
                       <Table.Th className="hide-sm">Value</Table.Th>
                       <Table.Th className="hide-sm">Note</Table.Th>
                       <Table.Th className="hide-sm">Photos</Table.Th>
+                      <Table.Th className="hide-sm">Submitted By</Table.Th>
                       <Table.Th>Emp Status</Table.Th>
                       <Table.Th>Review</Table.Th>
                     </Table.Tr>
@@ -854,18 +1014,21 @@ function ManagerView({
                               onChange={() => toggle(s.id, t.taskId)}
                             />
                           </Table.Td>
-                          <Table.Td><Text fw={600}>{meta?.title || t.taskId}</Text></Table.Td>
+                          <Table.Td><Text fw={600}>{getTaskMeta(s.tasklistId, t.taskId)?.title || t.taskId}</Text></Table.Td>
                           <Table.Td className="hide-sm">{t.value ?? "-"}</Table.Td>
                           <Table.Td className="hide-sm">{t.note || "-"}</Table.Td>
                           <Table.Td className="hide-sm">
                             {(t.photos || []).length ? (
-                              <Group gap="xs" wrap="wrap">
-                                {(t.photos || []).map((p, j) => (
-                                  <Badge key={j} variant="light" leftSection={<IconPhoto size={14} />}>{p}</Badge>
-                                ))}
-                              </Group>
+                              <PhotoThumbs
+                                urls={(t.photos || [])
+                                  .filter(p => typeof p === 'string' && p.includes('/'))
+                                  .map(p => toPublicUrl(supabase, 'evidence', p))}
+                                size={56}
+                                title="Evidence"
+                              />
                             ) : "-"}
                           </Table.Td>
+                          <Table.Td>{nameForUserId(t.submittedBy)}</Table.Td>
                           <Table.Td>
                             <Badge variant="outline" color={t.status === "Complete" ? "green" : "gray"}>
                               {t.na ? "N/A" : t.status}
@@ -900,8 +1063,22 @@ function ManagerView({
               </ScrollArea>
 
               <Group justify="flex-end" mt="sm">
-                <Button variant="default" onClick={() => applyReview(s.id, "Rework")}>Rework Selected</Button>
-                <Button onClick={() => applyReview(s.id, "Approved")}>Approve Selected</Button>
+                <TextInput
+                  label="Rework reason"
+                  placeholder="What needs to be fixed?"
+                  value={reworkNote}
+                  onChange={(e) => setReworkNote(e.target.value)}
+                  maw={480}
+                />
+                <Button
+                  variant="default"
+                  onClick={() => applyReview(s.id, "Rework", reworkNote /* from your TextInput */)}
+                >
+                  Rework Selected
+                </Button>
+                <Button onClick={() => applyReview(s.id, "Approved")}>
+                  Approve Selected
+                </Button>
               </Group>
             </Card>
           ))}
@@ -1074,6 +1251,29 @@ function AppInner() {
       setCurrentEmployee(employees[0]?.id ? String(employees[0].id) : "");
     }
   }, [employees, currentEmployee]);
+  // Get today's date in the given timezone
+  function todayISOInTz(tz) {
+    // 'en-CA' -> 'YYYY-MM-DD'
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(new Date());
+  }
+
+
+  const [todayTz, setTodayTz] = useState(() => todayISOInTz(company.timezone || 'UTC'));
+
+  useEffect(() => {
+    // re-evaluate immediately when timezone changes
+    setTodayTz(todayISOInTz(company.timezone || 'UTC'));
+
+    // tick every minute to catch midnight rollover in that tz
+    const id = setInterval(() => {
+      const d = todayISOInTz(company.timezone || 'UTC');
+      setTodayTz(prev => (prev === d ? prev : d));
+    }, 60_000);
+
+    return () => clearInterval(id);
+  }, [company.timezone]);
 
   // Today’s tasklists (from admin templates + ad-hoc)
   const tasklistsToday = useMemo(() => {
@@ -1081,9 +1281,86 @@ function AppInner() {
     return resolveTasklistsForDayFromLists(checklists, activeLocationId, today, company.timezone);
   }, [checklists, activeLocationId, company.timezone]);
 
+  useEffect(() => {
+    if (!company.id || !activeLocationId || tasklistsToday.length === 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      const dateISO = todayISOInTz(company.timezone || 'UTC');
+
+      // fetch all current tasklists’ server state in parallel
+      const results = await Promise.all(
+        tasklistsToday.map(tl =>
+          fetchSubmissionAndTasks({
+            supabase,
+            companyId: company.id,
+            tasklistId: tl.id,
+            locationId: tl.locationId,
+            dateISO
+          }).then(r => ({ tl, ...r }))
+        )
+      );
+
+      if (cancelled) return;
+
+      // Build a fresh working map from server rows, falling back to defaults
+      const nextWorking = {};
+      for (const { tl, tasks } of results) {
+        const byId = new Map(tasks.map(r => [r.task_id, r]));
+        nextWorking[tl.id] = tl.tasks.map(t => {
+          const row = byId.get(t.id);
+          return row
+            ? {
+              taskId: t.id,
+              status: row.status,                         // 'Complete' | 'Incomplete'
+              reviewStatus: row.review_status,            // 'Pending' | 'Approved' | 'Rework'
+              na: !!row.na,
+              // map value text back to UI type
+              value: t.inputType === 'number'
+                ? (row.value !== null && row.value !== '' ? Number(row.value) : null)
+                : t.inputType === 'text'
+                  ? (row.value ?? '')
+                  : row.value,
+              note: row.note ?? '',
+              photos: Array.isArray(row.photos) ? row.photos : [],
+            }
+            : {
+              taskId: t.id,
+              status: 'Incomplete',
+              reviewStatus: 'Pending',
+              na: false,
+              value: null,
+              note: '',
+              photos: [],
+            };
+        });
+      }
+
+      setWorking(nextWorking);
+    })();
+
+    return () => { cancelled = true; };
+  }, [supabase, company.id, company.timezone, tasklistsToday]);
+
   function getTaskMetaToday(tasklistId, taskId) {
     const tl = tasklistsToday.find((x) => x.id === tasklistId);
     return tl?.tasks.find((t) => t.id === taskId) || { title: taskId, inputType: "checkbox" };
+  }
+
+  function getTaskMetaForManagers(tasklistId, taskId) {
+    // 1) today's resolved tasklists (depends on activeLocation/time)
+    const tlToday = tasklistsToday.find(x => x.id === tasklistId);
+    const metaToday = tlToday?.tasks?.find(t => t.id === taskId);
+    if (metaToday) return metaToday;
+  
+    // 2) any template in company (independent of location/recurrence)
+    const tlAny = (checklists.templates || []).find(x => x.id === tasklistId);
+    const metaAny = tlAny?.tasks?.find(t => t.id === taskId);
+    if (metaAny) return metaAny;
+  
+    // 3) fallback
+    return { id: taskId, title: taskId, inputType: "checkbox" };
   }
 
   // Working state (per tasklist)
@@ -1099,37 +1376,37 @@ function AppInner() {
   const [pinModal, setPinModal] = useState({ open: false, onConfirm: null });
 
   useEffect(() => {
-  setWorking((prev) => {
-    const next = { ...prev };
+    setWorking((prev) => {
+      const next = { ...prev };
 
-    tasklistsToday.forEach((tl) => {
-      const existing = next[tl.id] ?? [];
-      const byId = new Map(existing.map((s) => [s.taskId, s]));
+      tasklistsToday.forEach((tl) => {
+        const existing = next[tl.id] ?? [];
+        const byId = new Map(existing.map((s) => [s.taskId, s]));
 
-      // ensure there's a state row for every current task
-      const merged = tl.tasks.map((t) =>
-        byId.get(t.id) ?? {
-          taskId: t.id,
-          status: "Incomplete",
-          value: null,
-          note: "",
-          photos: [],
-          na: false,
-          reviewStatus: "Pending",
-        }
-      );
+        // ensure there's a state row for every current task
+        const merged = tl.tasks.map((t) =>
+          byId.get(t.id) ?? {
+            taskId: t.id,
+            status: "Incomplete",
+            value: null,
+            note: "",
+            photos: [],
+            na: false,
+            reviewStatus: "Pending",
+          }
+        );
 
-      next[tl.id] = merged;
+        next[tl.id] = merged;
+      });
+
+      // drop tasklists that no longer exist today
+      Object.keys(next).forEach((k) => {
+        if (!tasklistsToday.find((tl) => tl.id === k)) delete next[k];
+      });
+
+      return next;
     });
-
-    // drop tasklists that no longer exist today
-    Object.keys(next).forEach((k) => {
-      if (!tasklistsToday.find((tl) => tl.id === k)) delete next[k];
-    });
-
-    return next;
-  });
-}, [tasklistsToday]);
+  }, [tasklistsToday]);
 
   function updateTaskState(tlId, taskId, patch) {
     setWorking((prev) => {
@@ -1140,59 +1417,155 @@ function AppInner() {
   }
   const handleComplete = async (tasklist, task) => {
     const st = working?.[tasklist.id]?.find((s) => s.taskId === task.id) ?? {};
-    const taskState = { status: "Complete", value: st.value ?? task.value ?? true };
-
     if (!canTaskBeCompleted(task, st)) {
-      alert("Finish required inputs first (photo/note/number in range).");
+      alert('Finish required inputs first (photo/note/number in range).');
       return;
     }
-    const { error } = await supabase
-      .from("tasklist_task")
-      .update(taskState)
-      .eq("id", task.id)
-      .eq("tasklist_id", tasklist.id);
 
-    if (error) {
-      console.error(error);
-      alert("Failed to complete task");
-    } else {
-      setWorking((prev) => ({
-        ...prev,
-        [tasklist.id]: (prev[tasklist.id] ?? []).map((ti) =>
-          ti.taskId === task.id ? { ...ti, status: "Complete" } : ti
-        ),
-      }));
-    }
+    setPinModal({
+      open: true,
+      onConfirm: async (pin) => {
+        try {
+          // 1) Validate PIN *per company* every time
+          const user = await validatePin({ supabase, companyId: company.id, pin });
+          if (!user) { alert('Wrong PIN'); return; }
+
+          // 2) Find/create submission for today
+          const dateISO = todayISOInTz(company.timezone || 'UTC');
+          const submissionId = await findOrCreateSubmission({
+            supabase,
+            companyId: company.id,
+            tasklistId: tasklist.id,
+            locationId: tasklist.locationId,
+            dateISO,
+          });
+
+          // 3) Map input to text (checkbox/number/text)
+          const valueText =
+            task.inputType === 'number' ? String(st.value ?? '')
+              : task.inputType === 'text' ? String(st.note ?? '')
+                : 'true';
+
+          // 4) Upsert and stamp submitted_by = PIN user.id (UUID)
+          await upsertSubmissionTask({
+            supabase,
+            submissionId,
+            taskId: task.id,
+            payload: {
+              status: 'Complete',
+              review_status: 'Pending',
+              na: !!st.na,
+              value: valueText || null,
+              note: st.note ?? null,
+              photos: Array.isArray(st.photos) ? st.photos : [],
+              submitted_by: user.id,       // <<<<<<<<<< IMPORTANT
+            },
+          });
+
+          // (optional) also stamp the parent submission with the same user if you add a matching column
+          await supabase.from('submission')
+            .update({ submitted_by: user.id })
+            .eq('id', submissionId)
+            .eq('company_id', company.id);
+
+          // keep the rest of your refresh/optimistic UI as-is ...
+          try {
+            const { tasks } = await fetchSubmissionAndTasks({
+              supabase,
+              companyId: company.id,
+              tasklistId: tasklist.id,
+              locationId: tasklist.locationId,
+              dateISO
+            });
+            const byId = new Map(tasks.map(r => [r.task_id, r]));
+            setWorking(prev => ({
+              ...prev,
+              [tasklist.id]: tasklist.tasks.map(t => {
+                const row = byId.get(t.id);
+                return row ? {
+                  taskId: t.id,
+                  status: row.status,
+                  reviewStatus: row.review_status,
+                  na: !!row.na,
+                  value: task.inputType === 'number'
+                    ? (row.value !== null && row.value !== '' ? Number(row.value) : null)
+                    : task.inputType === 'text'
+                      ? (row.value ?? '')
+                      : row.value,
+                  note: row.note ?? '',
+                  photos: Array.isArray(row.photos) ? row.photos : [],
+                } : (prev[tasklist.id]?.find(x => x.taskId === t.id) ?? {
+                  taskId: t.id, status: 'Incomplete', reviewStatus: 'Pending', na: false, value: null, note: '', photos: []
+                });
+              })
+            }));
+          } catch { }
+
+          setWorking(prev => ({
+            ...prev,
+            [tasklist.id]: (prev[tasklist.id] ?? []).map(ti =>
+              ti.taskId === task.id ? { ...ti, status: 'Complete', reviewStatus: 'Pending' } : ti
+            ),
+          }));
+        } catch (e) {
+          console.error(e);
+          alert(e.message || 'Failed to complete task');
+        } finally {
+          setPinModal({ open: false, onConfirm: null });
+        }
+      },
+    });
   };
 
   const handleUpload = async (tasklist, task, file) => {
-    // Upload file to Supabase Storage
-    const cid = await getMyCompanyId();
+    try {
+      const path = await uploadEvidence({
+        supabase,
+        bucket: 'evidence',
+        companyId: company.id,
+        tasklistId: tasklist.id,
+        taskId: task.id,
+        file
+      });
 
-    const { data, error } = await supabase.storage
-      .from('evidence')
-      .upload(`company/${cid}/task/${tasklist.id}/${task.id}/${Date.now()}_${file.name}`, file);
+      const dateISO = todayISOInTz(company.timezone || 'UTC');
+      const submissionId = await findOrCreateSubmission({
+        supabase, companyId: company.id, tasklistId: tasklist.id, locationId: tasklist.locationId, dateISO
+      });
 
-    if (error) {
-      console.error(error);
-      alert('Failed to upload file');
-      return;
-    }
+      // Read current server photos for this task (optional; or trust client state)
+      const { data: row } = await supabase
+        .from('submission_task')
+        .select('status, review_status, na, value, note, photos')
+        .eq('submission_id', submissionId)
+        .eq('task_id', task.id)
+        .maybeSingle();
+      const serverPhotos = Array.isArray(row?.photos) ? row.photos : [];
 
-    // Get the file URL
-    const { data: pub } = supabase.storage.from("evidence").getPublicUrl(data.path);
-    const fileUrl = pub.publicUrl;
+      await upsertSubmissionTask({
+        supabase,
+        submissionId,
+        taskId: task.id,
+        payload: {
+          status: row ? row.status : 'Incomplete',
+          review_status: row ? row.review_status : 'Pending',
+          photos: [...serverPhotos, path],
+          na: row ? row.na : false,
+          value: row?.value ?? null,
+          note: row?.note ?? null,
+        },
+      });
 
-    // Update task with the uploaded photo link
-    const { error: updateError } = await supabase
-      .from('tasks')  // Replace with your actual table name
-      .update({ photos: [fileUrl] })
-      .eq('id', task.id)
-      .eq('tasklist_id', tasklist.id);
-
-    if (updateError) {
-      console.error(updateError);
-      alert('Failed to update task with file');
+      // also mirror to UI
+      setWorking(prev => ({
+        ...prev,
+        [tasklist.id]: (prev[tasklist.id] ?? []).map(ti =>
+          ti.taskId === task.id ? { ...ti, photos: [...(ti.photos || []), path] } : ti
+        )
+      }));
+    } catch (e) {
+      console.error(e);
+      alert('Failed to upload photo');
     }
   };
 
@@ -1318,16 +1691,19 @@ function AppInner() {
                   submissions={submissions}
                   setSubmissions={setSubmissions}
                   setWorking={setWorking}
+                  company={company}
                 />
               )}
               {mode === "manager" && (
                 <ManagerView
                   submissions={submissions}
+                  company={company}
                   checklists={checklists}
                   locations={locations}
                   setSubmissions={setSubmissions}
                   setWorking={setWorking}
-                  getTaskMeta={getTaskMetaToday}
+                  getTaskMeta={getTaskMetaForManagers}
+                  employees={employees}
                 />
               )}
 

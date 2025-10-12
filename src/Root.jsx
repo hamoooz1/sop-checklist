@@ -89,7 +89,7 @@ export default function Root() {
           />
         </MantineProvider>
       ) : (
-        <App />
+        <App session={session} profile={profile} />
       )}
     </BrowserRouter>
   );

@@ -1,7 +1,7 @@
 /* Queries.js file containing all helpers and queries to DB*/
 
-import { supabase } from "./lib/supabase";
-import { getMyCompanyId } from "./lib/company";
+import { supabase } from "./supabase";
+import { getMyCompanyId } from "./company";
 
 // ---------- tiny utils ----------
 const BUCKET = "evidence";
