@@ -9,6 +9,16 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* collapse table columns on small screens */
+@media (max-width: 48em) { /* Mantine 'sm' */
+  .hide-sm { display: none !important; }
+}
+
+/* keep sticky cards from consuming too much space on short phones */
+@media (max-height: 700px) {
+  .sticky-card { top: 64px !important; }
+}
+
 a {
   font-weight: 500;
   color: #646cff;

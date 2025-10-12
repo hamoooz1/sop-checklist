@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useState, useMemo } from "react";
 import {
   Card, Stack, Group, Text, Button, TextInput, ColorInput, Select, MultiSelect,
   NumberInput, Switch, FileButton, Badge, Table, ScrollArea, Divider,
-  NavLink, Grid, Modal, ActionIcon, rem
+  NavLink, Grid, Modal, ActionIcon, Drawer, Burger, rem
 } from "@mantine/core";
 
 import { supabase } from "./lib/supabase.js";
 
 import { IconUpload, IconDeviceFloppy, IconTrash, IconPlus, IconSettings } from "@tabler/icons-react";
+import { useDisclosure } from "@mantine/hooks";
 import {
   hydrateAll, updateCompany,
   listLocations, createLocation, updateLocation, deleteLocation,
@@ -117,7 +118,6 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
   }), [
     draft.company.name,
     draft.company.brandColor,
-    draft.company.brand_color,
     draft.company.timezone,
     draft.company.weekStart,
     draft.company.locale,
@@ -125,139 +125,182 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
   ]);
 
 
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(240px, 280px) 1fr",
-        gap: "16px",
-        alignItems: "start",
-        minHeight: "calc(100dvh - 64px - 16px)",
-      }}
-    >
-      <Card
-        withBorder
-        radius="md"
-        style={{ position: "sticky", height: "fit-content", zIndex: 1, top: 80 }}
-      >
-        <Text fw={700} mb="xs">Admin Settings</Text>
-        <Stack gap={2}>
-          <NavLink active={view === "company"} label="Company" onClick={() => setView("company")} leftSection={<IconSettings size={16} />} />
-          <NavLink active={view === "locations"} label="Locations" onClick={() => setView("locations")} />
-          <NavLink active={view === "users"} label="Users & Roles" onClick={() => setView("users")} />
-          <NavLink active={view === "checklists"} label="Checklists & Templates" onClick={() => setView("checklists")} />
-          <NavLink active={view === "policies"} label="Evidence & Compliance" onClick={() => setView("policies")} />
-          <NavLink active={view === "notifications"} label="Notifications" onClick={() => setView("notifications")} />
-          <NavLink active={view === "security"} label="Security & PIN" onClick={() => setView("security")} />
-          <NavLink active={view === "branding"} label="Branding & Theme" onClick={() => setView("branding")} />
-          <NavLink active={view === "data"} label="Data & Export" onClick={() => setView("data")} />
-        </Stack>
-      </Card>
-
-      <ScrollArea.Autosize
-        mah="calc(100dvh - 64px - 16px)"
-        type="auto"
-        scrollbarSize={8}
-        styles={{ viewport: { overflowX: "hidden" } }}
-        style={{ minWidth: 0 }}
-      >
-        <div style={{ minWidth: 0 }}>
-          {view === "company" && (
-            <CompanyPane
-              companyId={companyId}
-              initial={companyInitial}
-              onUpdate={async (id, patch) => {
-                await updateCompany(id, patch);     // persist to DB
-                refreshHeaderData?.();              // header picks up latest users/locations
-                setDraft(prev => ({
-                  ...prev,
-                  company: {
-                    ...prev.company,
-                    name: patch.name ?? prev.company.name,
-                    brandColor: patch.brand_color ?? prev.company.brandColor,
-                    timezone: patch.timezone ?? prev.company.timezone,
-                    logo: patch.logo ?? prev.company.logo,
-                  }
-                }));
-                refreshCompanySettings?.(); // instant header update from DB
-                refreshHeaderData?.();      // users/locations (unchanged, but fine)
-              }}
-            />
-          )}
-
-          {view === "locations" && (
-            <LocationsPane
-              locations={locations}
-              companyId={companyId}
-              onAdd={async (row) => { await createLocation(row); await refreshLocations(); refreshHeaderData?.(); }}
-              onUpdate={async (id, patch) => {
-                // optimistic
-                setLocations(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
-                await updateLocation(id, patch);
-                refreshHeaderData?.();
-              }}
-              onDelete={async (id) => {
-                setLocations(prev => prev.filter(l => l.id !== id));
-                await deleteLocation(id); await refreshLocations();
-                refreshHeaderData?.();
-              }}
-            />
-          )}
-          {view === "users" && (
-            <UsersPane
-              companyId={companyId}
-              users={users}
-              locations={locations}
-              onInvite={async (row) => { await createUser({ ...row, company_id: companyId }); await refreshUsers(); refreshHeaderData?.(); }}
-              onUpdate={async (id, patch) => {
-                if ("pin" in patch) {
-                  const digits = String(patch.pin ?? "").replace(/\D/g, "").slice(0, 6);
-                  // If your DB column is TEXT/VARCHAR (recommended), keep string:
-                  patch.pin = digits === "" ? null : digits;
-
-                  // If your DB column is SMALLINT/INT instead, use:
-                  // patch.pin = digits === "" ? null : Number(digits);
-                }
-
-                setUsers(prev => prev.map(u => (u.id === id ? { ...u, ...patch } : u)));
-                await updateUser(id, patch);
-                refreshHeaderData?.();
-              }}
-              onDelete={async (id) => {
-                setUsers(prev => prev.filter(u => u.id !== id));
-                await deleteUser(id);
-                refreshHeaderData?.();
-              }}
-            />
-          )}
-          {view === "policies" && <PoliciesPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "notifications" && <NotificationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "security" && <SecurityPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "branding" && <BrandingPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />}
-          {view === "checklists" && <ChecklistsPane
-            companyId={companyId}
-            locations={locations}
-            settings={draft}
-            setSettings={setDraft}
-            onSave={saveDraftToApp}
-            onReloadChecklists={onReloadChecklists}
-          />}
-          {view === "data" && (
-            <DataPane
-              settings={draft}
-              submissions={submissions}
-              onImportSettings={(json) => setDraft(json)}
-              onSeedDemo={settings?.__seedDemo}
-              locations={locations}
-              users={users}
-            />
-          )}
-
-        </div>
-      </ScrollArea.Autosize>
-    </div>
-  );
-}
+    const [navOpened, { open: openNav, close: closeNav, toggle: toggleNav }] = useDisclosure(false);
+  
+    return (
+      <Stack gap="sm">
+        {/* Mobile top bar for Admin section */}
+        <Group px="xs" py={4} justify="space-between" hiddenFrom="sm">
+          <Group gap="xs">
+            <Burger opened={navOpened} onClick={toggleNav} aria-label="Open admin menu" />
+            <Text fw={700}>Admin Settings</Text>
+          </Group>
+        </Group>
+    
+        <Grid gutter="sm" align="start">
+          {/* Sidebar (visible on ≥sm) */}
+          <Grid.Col span={{ base: 12, sm: 4, md: 3 }} visibleFrom="sm">
+            <Card
+              withBorder
+              radius="md"
+              className="sticky-card"
+              style={{ position: "sticky", top: 80, height: "fit-content", zIndex: 1 }}
+            >
+              <Text fw={700} mb="xs">Admin Settings</Text>
+              <Stack gap={2}>
+                <NavLink active={view === "company"} label="Company" onClick={() => setView("company")} leftSection={<IconSettings size={16} />} />
+                <NavLink active={view === "locations"} label="Locations" onClick={() => setView("locations")} />
+                <NavLink active={view === "users"} label="Users & Roles" onClick={() => setView("users")} />
+                <NavLink active={view === "checklists"} label="Checklists & Templates" onClick={() => setView("checklists")} />
+                <NavLink active={view === "policies"} label="Evidence & Compliance" onClick={() => setView("policies")} />
+                <NavLink active={view === "notifications"} label="Notifications" onClick={() => setView("notifications")} />
+                <NavLink active={view === "security"} label="Security & PIN" onClick={() => setView("security")} />
+                <NavLink active={view === "branding"} label="Branding & Theme" onClick={() => setView("branding")} />
+                <NavLink active={view === "data"} label="Data & Export" onClick={() => setView("data")} />
+              </Stack>
+            </Card>
+          </Grid.Col>
+    
+          {/* Content */}
+          <Grid.Col span={{ base: 12, sm: 8, md: 9 }}>
+            <ScrollArea.Autosize
+              mah="calc(100dvh - 60px - 16px)"
+              type="auto"
+              scrollbarSize={8}
+              styles={{ viewport: { overflowX: "hidden" } }}
+              style={{ minWidth: 0 }}
+            >
+              <div style={{ minWidth: 0 }}>
+                {view === "company" && (
+                  <CompanyPane
+                    companyId={companyId}
+                    initial={companyInitial}
+                    onUpdate={async (id, patch) => {
+                      await updateCompany(id, patch);     // persist to DB
+                      refreshHeaderData?.();              // header picks up latest users/locations
+                      setDraft(prev => ({
+                        ...prev,
+                        company: {
+                          ...prev.company,
+                          name: patch.name ?? prev.company.name,
+                          brandColor: patch.brand_color ?? prev.company.brandColor,
+                          timezone: patch.timezone ?? prev.company.timezone,
+                          logo: patch.logo ?? prev.company.logo,
+                        }
+                      }));
+                      refreshCompanySettings?.(); // instant header update from DB
+                      refreshHeaderData?.();      // users/locations (unchanged, but fine)
+                    }}
+                  />
+                )}
+    
+                {view === "locations" && (
+                  <LocationsPane
+                    locations={locations}
+                    companyId={companyId}
+                    onAdd={async (row) => { await createLocation(row); await refreshLocations(); refreshHeaderData?.(); }}
+                    onUpdate={async (id, patch) => {
+                      // optimistic
+                      setLocations(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+                      await updateLocation(id, patch);
+                      refreshHeaderData?.();
+                    }}
+                    onDelete={async (id) => {
+                      setLocations(prev => prev.filter(l => l.id !== id));
+                      await deleteLocation(id); await refreshLocations();
+                      refreshHeaderData?.();
+                    }}
+                  />
+                )}
+    
+                {view === "users" && (
+                  <UsersPane
+                    companyId={companyId}
+                    users={users}
+                    locations={locations}
+                    onInvite={async (row) => { await createUser({ ...row, company_id: companyId }); await refreshUsers(); refreshHeaderData?.(); }}
+                    onUpdate={async (id, patch) => {
+                      if ("pin" in patch) {
+                        const digits = String(patch.pin ?? "").replace(/\D/g, "").slice(0, 6);
+                        // If your DB column is TEXT/VARCHAR (recommended), keep string:
+                        patch.pin = digits === "" ? null : digits;
+                        // If your DB column is SMALLINT/INT instead, use:
+                        // patch.pin = digits === "" ? null : Number(digits);
+                      }
+    
+                      setUsers(prev => prev.map(u => (u.id === id ? { ...u, ...patch } : u)));
+                      await updateUser(id, patch);
+                      refreshHeaderData?.();
+                    }}
+                    onDelete={async (id) => {
+                      setUsers(prev => prev.filter(u => u.id !== id));
+                      await deleteUser(id);
+                      refreshHeaderData?.();
+                    }}
+                  />
+                )}
+    
+                {view === "policies" && (
+                  <PoliciesPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />
+                )}
+                {view === "notifications" && (
+                  <NotificationsPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />
+                )}
+                {view === "security" && (
+                  <SecurityPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />
+                )}
+                {view === "branding" && (
+                  <BrandingPane settings={draft} setSettings={setDraft} onSave={saveDraftToApp} />
+                )}
+                {view === "checklists" && (
+                  <ChecklistsPane
+                    companyId={companyId}
+                    locations={locations}
+                    settings={draft}
+                    setSettings={setDraft}
+                    onSave={saveDraftToApp}
+                    onReloadChecklists={onReloadChecklists}
+                  />
+                )}
+                {view === "data" && (
+                  <DataPane
+                    settings={draft}
+                    submissions={submissions}
+                    onImportSettings={(json) => setDraft(json)}
+                    onSeedDemo={settings?.__seedDemo}
+                    locations={locations}
+                    users={users}
+                  />
+                )}
+              </div>
+            </ScrollArea.Autosize>
+          </Grid.Col>
+        </Grid>
+    
+        {/* Mobile sidebar Drawer */}
+        <Drawer
+          opened={navOpened}
+          onClose={closeNav}
+          title="Admin Settings"
+          padding="md"
+          size="100%"
+          hiddenFrom="sm"
+        >
+          <Stack gap="xs">
+            <NavLink active={view === "company"} label="Company" onClick={() => { setView("company"); closeNav(); }} leftSection={<IconSettings size={16} />} />
+            <NavLink active={view === "locations"} label="Locations" onClick={() => { setView("locations"); closeNav(); }} />
+            <NavLink active={view === "users"} label="Users & Roles" onClick={() => { setView("users"); closeNav(); }} />
+            <NavLink active={view === "checklists"} label="Checklists & Templates" onClick={() => { setView("checklists"); closeNav(); }} />
+            <NavLink active={view === "policies"} label="Evidence & Compliance" onClick={() => { setView("policies"); closeNav(); }} />
+            <NavLink active={view === "notifications"} label="Notifications" onClick={() => { setView("notifications"); closeNav(); }} />
+            <NavLink active={view === "security"} label="Security & PIN" onClick={() => { setView("security"); closeNav(); }} />
+            <NavLink active={view === "branding"} label="Branding & Theme" onClick={() => { setView("branding"); closeNav(); }} />
+            <NavLink active={view === "data"} label="Data & Export" onClick={() => { setView("data"); closeNav(); }} />
+          </Stack>
+        </Drawer>
+      </Stack>
+    );}
+    
 
 /* ---------- PANES ---------- */
 
@@ -412,7 +455,7 @@ function LocationsPane({ locations, onAdd, onUpdate, onDelete, companyId }) {
       </ScrollArea.Autosize>
 
 
-      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add location" centered>
+      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add location" centered fullScreen>
         <Stack>
           <TextInput label="Name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           <Select
@@ -477,8 +520,8 @@ function UsersPane({ users, locations, onInvite, onUpdate, onDelete }) {
         <Table highlightOnHover style={{ tableLayout: "fixed", width: "100%" }}>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th style={{ width: "24%" }}>Name</Table.Th>
-              <Table.Th style={{ width: "26%" }}>Email</Table.Th>
+              <Table.Th style={{ width: "22%" }}>Name</Table.Th>
+              <Table.Th style={{ width: "24%" }}>Email</Table.Th>
               <Table.Th style={{ width: "16%" }}>Role</Table.Th>
               <Table.Th style={{ width: "24%" }}>Location</Table.Th>
               <Table.Th style={{ width: "10%" }}>Pin</Table.Th>
@@ -573,7 +616,7 @@ function UsersPane({ users, locations, onInvite, onUpdate, onDelete }) {
       </ScrollArea.Autosize>
 
       {/* Add user modal (mirrors Locations "Add") */}
-      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add user" centered>
+      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add user" centered fullScreen>
         <Stack gap="sm">
           <Group grow wrap="wrap">
             <TextInput
@@ -882,7 +925,7 @@ function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, loc
 
           <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
 
-          <Modal opened={tbOpen} onClose={() => setTbOpen(false)} title="Time block" centered>
+          <Modal opened={tbOpen} onClose={() => setTbOpen(false)} title="Time block" centered fullScreen>
             <Stack>
               <TextInput label="Name" value={tbDraft.name} onChange={(e) => setTbDraft({ ...tbDraft, name: e.target.value })} />
               <Group grow>
@@ -942,7 +985,7 @@ function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, loc
 
           <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
 
-          <Modal opened={createTplOpen || editTplOpen} onClose={() => { setCreateTplOpen(false); setEditTplOpen(false); }} title="Template" centered>
+          <Modal opened={createTplOpen || editTplOpen} onClose={() => { setCreateTplOpen(false); setEditTplOpen(false); }} title="Template" centered fullScreen>
             <Stack gap="sm">
               <TextInput label="Template name" value={tplDraft.name} onChange={(e) => setTplDraft({ ...tplDraft, name: e.target.value })} />
               <Group grow wrap="nowrap">
@@ -1025,7 +1068,7 @@ function ChecklistsPane({ settings, setSettings, onSave, onReloadChecklists, loc
 
           <Group justify="flex-end"><Button onClick={onSave}>Save</Button></Group>
 
-          <Modal opened={adhocOpen} onClose={() => setAdhocOpen(false)} title="Ad-hoc tasks" centered>
+          <Modal opened={adhocOpen} onClose={() => setAdhocOpen(false)} title="Ad-hoc tasks" centered fullScreen>
             <Stack>
               <Group grow>
                 <TextInput label="Date (YYYY-MM-DD)" value={adhocDraft.date} onChange={(e) => setAdhocDraft({ ...adhocDraft, date: e.target.value })} />
