@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import AdminView from "./AdminView";
-import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea } from "@mantine/core";
+import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea, Popover } from "@mantine/core";
 
 import { supabase } from "./lib/supabase.js";
 import {
@@ -16,7 +16,11 @@ import {
   toPublicUrl,         // <-- add
 } from './lib/submissions';
 import { useLocalStorage, useDisclosure } from "@mantine/hooks";
-import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload, IconMapPin, IconUser, IconLayoutGrid, IconLayoutList, IconBug, IconLogout, IconShieldHalf, IconFilter, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
+import {
+  IconSun, IconMoon, IconPhoto, IconCheck, IconUpload, IconMapPin, IconUser,
+  IconLayoutGrid, IconLayoutList, IconBug, IconLogout, IconShieldHalf, IconFilter,
+  IconChevronDown, IconChevronRight, IconListCheck, IconShoppingCart
+} from "@tabler/icons-react";
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
 import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates, listRestockRequests, createRestockRequest, completeRestockRequest } from "./lib/queries.js";
 import BugReport from "./components/BugReport.jsx";
@@ -118,6 +122,32 @@ function ThemeToggle({ scheme, setScheme }) {
     >
       {scheme === "dark" ? <IconSun size={18} /> : <IconMoon size={18} />}
     </ActionIcon>
+  );
+}
+
+function EmployeeFiltersForm({ positionFilter, setPositionFilter, templates, onClose }) {
+  const positionOptions = Array.from(
+    new Set((templates || []).flatMap(t => Array.isArray(t.positions) ? t.positions.map(String) : []))
+  ).filter(Boolean).map(p => ({ value: p, label: p }));
+
+  return (
+    <Stack gap="sm" p="xs" style={{ minWidth: 280 }}>
+      <Text fw={600}>Filters</Text>
+      <Select
+        label="Position"
+        placeholder="All positions"
+        value={positionFilter}
+        onChange={(v) => setPositionFilter(v || "")}
+        data={positionOptions}
+        clearable
+        searchable
+        comboboxProps={{ withinPortal: true }}
+      />
+      <Group justify="space-between" mt="xs">
+        <Button variant="light" onClick={() => setPositionFilter("")}>Clear</Button>
+        <Button onClick={onClose}>Apply</Button>
+      </Group>
+    </Stack>
   );
 }
 
@@ -282,147 +312,147 @@ function EmployeeView({
             </Group>
 
             <Collapse in={isOpen}>
-            <Stack gap="xs" mt="md">
-              {tl.tasks.map((task) => {
-                const state = states.find((s) => s.taskId === task.id);
-                const isComplete = state.status === "Complete";
-                const canComplete = canTaskBeCompleted(task, state);
-                const opened = isTaskOpen(tl.id, task.id);
-                return (
-                  <Card
-                    key={task.id}
-                    withBorder
-                    radius="md"
-                    style={{
-                      borderColor: isComplete ? "var(--mantine-color-green-6)" : undefined,
-                      background: isComplete ? "color-mix(in oklab, var(--mantine-color-green-6) 8%, var(--mantine-color-body))" : undefined,
-                    }}
-                  >
-                    <Group justify="space-between" align="flex-start" wrap="nowrap">
-                      <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                        <ActionIcon variant="subtle" onClick={() => toggleTaskOpen(tl.id, task.id)} aria-label="Toggle details">
-                          {opened ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
-                        </ActionIcon>
-                        <div style={{ minWidth: 0 }}>
-                          <Group gap={6} wrap="wrap">
-                            <Text fw={600} truncate c={isComplete ? "green.9" : undefined}>{task.title}</Text>
-                            {state.reviewStatus && (
-                              <Badge
-                                variant="outline"
-                                color={state.reviewStatus === "Approved" ? "green" : state.reviewStatus === "Rework" ? "yellow" : "gray"}
-                              >
-                                {state.reviewStatus}
-                              </Badge>
-                            )}
-                            {isComplete && (
-                              <Badge color="green" variant="light" leftSection={<IconCheck size={14} />}>Completed</Badge>
-                            )}
-                          </Group>
-                          <Text c="dimmed" fz="sm" mt={2}>
-                            {task.category} • {task.inputType}
-                            {task.photoRequired ? " • Photo required" : ""}
-                            {task.noteRequired ? " • Note required" : ""}
-                          </Text>
-                        </div>
-                      </Group>
+              <Stack gap="xs" mt="md">
+                {tl.tasks.map((task) => {
+                  const state = states.find((s) => s.taskId === task.id);
+                  const isComplete = state.status === "Complete";
+                  const canComplete = canTaskBeCompleted(task, state);
+                  const opened = isTaskOpen(tl.id, task.id);
+                  return (
+                    <Card
+                      key={task.id}
+                      withBorder
+                      radius="md"
+                      style={{
+                        borderColor: isComplete ? "var(--mantine-color-green-6)" : undefined,
+                        background: isComplete ? "color-mix(in oklab, var(--mantine-color-green-6) 8%, var(--mantine-color-body))" : undefined,
+                      }}
+                    >
+                      <Group justify="space-between" align="flex-start" wrap="nowrap">
+                        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                          <ActionIcon variant="subtle" onClick={() => toggleTaskOpen(tl.id, task.id)} aria-label="Toggle details">
+                            {opened ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+                          </ActionIcon>
+                          <div style={{ minWidth: 0 }}>
+                            <Group gap={6} wrap="wrap">
+                              <Text fw={600} truncate c={isComplete ? "green.9" : undefined}>{task.title}</Text>
+                              {state.reviewStatus && (
+                                <Badge
+                                  variant="outline"
+                                  color={state.reviewStatus === "Approved" ? "green" : state.reviewStatus === "Rework" ? "yellow" : "gray"}
+                                >
+                                  {state.reviewStatus}
+                                </Badge>
+                              )}
+                              {isComplete && (
+                                <Badge color="green" variant="light" leftSection={<IconCheck size={14} />}>Completed</Badge>
+                              )}
+                            </Group>
+                            <Text c="dimmed" fz="sm" mt={2}>
+                              {task.category} • {task.inputType}
+                              {task.photoRequired ? " • Photo required" : ""}
+                              {task.noteRequired ? " • Note required" : ""}
+                            </Text>
+                          </div>
+                        </Group>
 
-                      <Group gap="xs" wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }} visibleFrom="sm">
-                        {task.inputType === "number" && (
-                          <NumberInput
-                            placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
-                            value={state.value ?? ""}
-                            onChange={(v) => updateTaskState(tl.id, task.id, { value: Number(v) })}
-                            disabled={isComplete}
-                            style={{ width: rem(96) }}
-                          />
-                        )}
-
-                        <TextInput
-                          placeholder="Add note"
-                          value={state.note}
-                          onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
-                          disabled={isComplete && !task.noteRequired}
-                          style={{ width: rem(180) }}
-                          
-                        />
-
-                        <FileButton onChange={(file) => file && handleUpload(tl, task, file)} accept="image/*" disabled={isComplete}>
-                          {(props) => (
-                            <Button variant="default" leftSection={<IconUpload size={16} />} {...props}>
-                              Photo
-                            </Button>
-                          )}
-                        </FileButton>
-
-                        <Button
-                          variant={isComplete ? "outline" : "default"}
-                          color={isComplete ? "green" : undefined}
-                          onClick={() => handleComplete(tl, task)}
-                          disabled={!canComplete || isComplete}
-                        >
-                          {isComplete ? "Completed ✓" : "Complete"}
-                        </Button>
-
-                        <Switch
-                          checked={!!state.na}
-                          onChange={(e) => updateTaskState(tl.id, task.id, { na: e.currentTarget.checked })}
-                          disabled={isComplete}
-                          label="N/A"
-                        />
-                      </Group>
-                    </Group>
-
-                    <Collapse in={opened}>
-                      <Divider my={"sm"} />
-                      <Stack gap="xs">
-                        <TextInput
-                          placeholder="Add note"
-                          value={state.note}
-                          onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
-                          disabled={isComplete && !task.noteRequired}
-                          style={{ width: "100%" }}
-                          hiddenFrom="sm"
-                        />
-                        {/* Mobile actions */}
-                        <Stack gap="xs" hiddenFrom="sm">
+                        <Group gap="xs" wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }} visibleFrom="sm">
                           {task.inputType === "number" && (
                             <NumberInput
                               placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
                               value={state.value ?? ""}
                               onChange={(v) => updateTaskState(tl.id, task.id, { value: Number(v) })}
                               disabled={isComplete}
+                              style={{ width: rem(96) }}
                             />
                           )}
+
+                          <TextInput
+                            placeholder="Add note"
+                            value={state.note}
+                            onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
+                            disabled={isComplete && !task.noteRequired}
+                            style={{ width: rem(180) }}
+
+                          />
+
                           <FileButton onChange={(file) => file && handleUpload(tl, task, file)} accept="image/*" disabled={isComplete}>
                             {(props) => (
-                              <Button variant="default" leftSection={<IconUpload size={16} />} fullWidth {...props}>
-                                Upload Photo
+                              <Button variant="default" leftSection={<IconUpload size={16} />} {...props}>
+                                Photo
                               </Button>
                             )}
                           </FileButton>
+
                           <Button
                             variant={isComplete ? "outline" : "default"}
                             color={isComplete ? "green" : undefined}
                             onClick={() => handleComplete(tl, task)}
                             disabled={!canComplete || isComplete}
-                            fullWidth
                           >
-                            {isComplete ? "Completed ✓" : "Complete Task"}
+                            {isComplete ? "Completed ✓" : "Complete"}
                           </Button>
+
                           <Switch
                             checked={!!state.na}
                             onChange={(e) => updateTaskState(tl.id, task.id, { na: e.currentTarget.checked })}
                             disabled={isComplete}
                             label="N/A"
                           />
+                        </Group>
+                      </Group>
+
+                      <Collapse in={opened}>
+                        <Divider my={"sm"} />
+                        <Stack gap="xs">
+                          <TextInput
+                            placeholder="Add note"
+                            value={state.note}
+                            onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
+                            disabled={isComplete && !task.noteRequired}
+                            style={{ width: "100%" }}
+                            hiddenFrom="sm"
+                          />
+                          {/* Mobile actions */}
+                          <Stack gap="xs" hiddenFrom="sm">
+                            {task.inputType === "number" && (
+                              <NumberInput
+                                placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
+                                value={state.value ?? ""}
+                                onChange={(v) => updateTaskState(tl.id, task.id, { value: Number(v) })}
+                                disabled={isComplete}
+                              />
+                            )}
+                            <FileButton onChange={(file) => file && handleUpload(tl, task, file)} accept="image/*" disabled={isComplete}>
+                              {(props) => (
+                                <Button variant="default" leftSection={<IconUpload size={16} />} fullWidth {...props}>
+                                  Upload Photo
+                                </Button>
+                              )}
+                            </FileButton>
+                            <Button
+                              variant={isComplete ? "outline" : "default"}
+                              color={isComplete ? "green" : undefined}
+                              onClick={() => handleComplete(tl, task)}
+                              disabled={!canComplete || isComplete}
+                              fullWidth
+                            >
+                              {isComplete ? "Completed ✓" : "Complete Task"}
+                            </Button>
+                            <Switch
+                              checked={!!state.na}
+                              onChange={(e) => updateTaskState(tl.id, task.id, { na: e.currentTarget.checked })}
+                              disabled={isComplete}
+                              label="N/A"
+                            />
+                          </Stack>
+                          <EvidenceRow state={state} />
                         </Stack>
-                        <EvidenceRow state={state} />
-                      </Stack>
-                    </Collapse>
-                  </Card>
-                );
-              })}
-            </Stack>
+                      </Collapse>
+                    </Card>
+                  );
+                })}
+              </Stack>
             </Collapse>
           </Card>
         );
@@ -1898,9 +1928,6 @@ function AppInner() {
                     <ActionIcon variant="default" title="Employee / Location" onClick={open} hiddenFrom="sm">
                       <IconUser size={16} />
                     </ActionIcon>
-                    <ActionIcon variant="default" title="Filters" onClick={() => setFiltersOpen((v) => !v)}>
-                      <IconFilter size={16} />
-                    </ActionIcon>
                     <ActionIcon variant="default" title="Theme" onClick={() => setScheme(scheme === "dark" ? "light" : "dark")} hiddenFrom="sm">
                       {scheme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
                     </ActionIcon>
@@ -1935,9 +1962,6 @@ function AppInner() {
                       >
                         Logout
                       </Button>
-                      <ActionIcon variant="default" title="Filters" onClick={() => setFiltersOpen((v) => !v)}>
-                        <IconFilter size={16} />
-                      </ActionIcon>
                       <ThemeToggle scheme={scheme} setScheme={setScheme} />
                     </Group>
                   </Group>
@@ -1988,58 +2012,136 @@ function AppInner() {
               </>
             );
           })()}
-          {filtersOpen && (
-            <div style={{ borderTop: "1px solid var(--mantine-color-gray-3)", background: "var(--mantine-color-body)" }}>
-              <Container size="xl">
-                <Group py="sm" gap="sm" wrap="wrap" justify="space-between">
-                  <Group gap="sm" wrap="wrap">
-                    <Select
-                      label="Position"
-                      placeholder="All positions"
-                      value={positionFilter}
-                      onChange={(v) => setPositionFilter(v || "")}
-                      data={Array.from(new Set((checklists.templates || []).flatMap(t => Array.isArray(t.positions) ? t.positions.map(String) : [])))
-                        .filter(Boolean)
-                        .map((p) => ({ value: p, label: p }))}
-                      clearable
-                      searchable
-                      comboboxProps={{ withinPortal: true }}
-                      maw={260}
-                    />
-                  </Group>
-                  <Group gap="xs">
-                    <Button variant="light" onClick={() => setPositionFilter("")}>Clear</Button>
-                  </Group>
-                </Group>
-              </Container>
-            </div>
-          )}
         </AppShell.Header>
 
         {/* Page-level tabs sticky under header */}
         {mode === 'employee' && (
-          <div style={{ position: 'sticky', top: 100, zIndex: 2, background: 'var(--mantine-color-body)', borderBottom: '1px solid var(--mantine-color-gray-3)' }}>
+          <div
+            style={{
+              position: 'sticky',
+              top: 100,
+              zIndex: 2,
+              background: 'var(--mantine-color-body)',
+              borderBottom: '1px solid var(--mantine-color-gray-3)',
+            }}
+          >
             <Container size="xl">
               <Group justify="space-between" align="center" py="xs">
-                <Text fw={700}>Employee</Text>
-                <Tabs value={employeeTab} onChange={setEmployeeTab} variant="pills" keepMounted={false}>
+                {/* Left: mini nav (no "Employee" label) */}
+                <Tabs
+                  value={employeeTab}
+                  onChange={setEmployeeTab}
+                  variant="pills"
+                  keepMounted={false}
+                  styles={{
+                    list: { gap: 6 },
+                    tab: {
+                      borderRadius: 9999,
+                      transition: 'transform 120ms ease, background-color 120ms ease',
+                    },
+                    tabLabel: { display: 'flex', alignItems: 'center', gap: 8 },
+                  }}
+                >
                   <Tabs.List>
-                    <Tabs.Tab value="tasks">Tasks</Tabs.Tab>
-                    <Tabs.Tab value="restock">
+                    <Tabs.Tab
+                      value="tasks"
+                      leftSection={<IconListCheck size={14} />}
+                      style={{ cursor: 'pointer' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-1px)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+                    >
+                      Tasks
+                    </Tabs.Tab>
+
+                    <Tabs.Tab
+                      value="restock"
+                      leftSection={<IconShoppingCart size={14} />}
+                      style={{ cursor: 'pointer' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-1px)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+                    >
                       <Group gap={6} wrap="nowrap">
                         <span>Restock</span>
                         {restockOpenCount > 0 && (
-                          <span style={{ width: 8, height: 8, borderRadius: 9999, background: 'var(--mantine-color-red-6)', display: 'inline-block' }} />
+                          <span
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: 9999,
+                              background: 'var(--mantine-color-red-6)',
+                              display: 'inline-block',
+                            }}
+                          />
                         )}
                       </Group>
                     </Tabs.Tab>
                   </Tabs.List>
                 </Tabs>
+
+                {/* Right: Filters button lives *only* in this mini nav */}
+                 <Popover
+                  opened={filtersOpen}
+                  onChange={setFiltersOpen}
+                  position="bottom-end"
+                  withArrow
+                  shadow="md"
+                  withinPortal
+                  trapFocus
+                  transitionProps={{ transition: 'pop', duration: 120 }}
+                  visibleFrom="sm"
+                >
+                  <Popover.Target>
+                    <ActionIcon
+                      variant="default"
+                      title="Filters"
+                      onClick={() => setFiltersOpen((v) => !v)}
+                      aria-label="Toggle filters"
+                    >
+                      <IconFilter size={16} />
+                    </ActionIcon>
+                  </Popover.Target>
+                  <Popover.Dropdown>
+                    <EmployeeFiltersForm
+                      positionFilter={positionFilter}
+                      setPositionFilter={setPositionFilter}
+                      templates={checklists.templates}
+                      onClose={() => setFiltersOpen(false)}
+                    />
+                  </Popover.Dropdown>
+                </Popover>
+
+                {/* Mobile: full-screen modal with same content */}
+                <ActionIcon
+                  variant="default"
+                  title="Filters"
+                  onClick={() => setFiltersOpen(true)}
+                  aria-label="Toggle filters"
+                  hiddenFrom="sm"
+                >
+                  <IconFilter size={16} />
+                </ActionIcon>
+                <Modal
+                  opened={filtersOpen}
+                  onClose={() => setFiltersOpen(false)}
+                  fullScreen
+                  padding="md"
+                  hiddenFrom="sm"
+                  title="Filters"
+                  centered={false}
+                >
+                  <EmployeeFiltersForm
+                    positionFilter={positionFilter}
+                    setPositionFilter={setPositionFilter}
+                    templates={checklists.templates}
+                    onClose={() => setFiltersOpen(false)}
+                  />
+                </Modal>
               </Group>
             </Container>
           </div>
         )}
-        
+
+
 
         <AppShell.Main>
           {!companyId ? (
