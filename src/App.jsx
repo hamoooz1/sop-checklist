@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import AdminView from "./AdminView";
-import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider } from "@mantine/core";
+import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse } from "@mantine/core";
 
 import { supabase } from "./lib/supabase.js";
 import {
@@ -16,7 +16,7 @@ import {
   toPublicUrl,         // <-- add
 } from './lib/submissions';
 import { useLocalStorage, useDisclosure } from "@mantine/hooks";
-import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload, IconMapPin, IconUser, IconLayoutGrid, IconLayoutList, IconBug, IconLogout, IconShieldHalf, IconFilter } from "@tabler/icons-react";
+import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload, IconMapPin, IconUser, IconLayoutGrid, IconLayoutList, IconBug, IconLogout, IconShieldHalf, IconFilter, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
 import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates } from "./lib/queries.js";
 import BugReport from "./components/BugReport.jsx";
@@ -194,6 +194,8 @@ function EmployeeView({
   checklists,
   company
 }) {
+  const [openLists, setOpenLists] = React.useState({});
+
   return (
     <Stack gap="md">
       <Text fw={700} fz="lg">Today</Text>
@@ -217,11 +219,21 @@ function EmployeeView({
           return (st.status === "Complete" || st.na) && canTaskBeCompleted(t, st);
         });
 
+        const isOpen = openLists[tl.id] ?? true;
         return (
           <Card key={tl.id} withBorder radius="lg" shadow="sm">
             <Group justify="space-between" align="center">
               <div>
-                <Text fw={600}>{tl.name}</Text>
+                <Group gap={6} align="center">
+                  <ActionIcon
+                    variant="subtle"
+                    onClick={() => setOpenLists(prev => ({ ...prev, [tl.id]: !(prev[tl.id] ?? true) }))}
+                    aria-label="Toggle checklist"
+                  >
+                    {(isOpen ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />)}
+                  </ActionIcon>
+                  <Text fw={600}>{tl.name}</Text>
+                </Group>
                 <Text c="dimmed" fz="sm">
                   {getTimeBlockLabelFromLists(checklists.timeBlocks, tl.timeBlockId)}
                 </Text>
@@ -232,11 +244,13 @@ function EmployeeView({
               <Button onClick={() => signoff(tl)} disabled={!canSubmit}>Sign & Submit</Button>
             </Group>
 
-            <Stack gap="sm" mt="md">
+            <Collapse in={isOpen}>
+            <Stack gap="xs" mt="md">
               {tl.tasks.map((task) => {
                 const state = states.find((s) => s.taskId === task.id);
                 const isComplete = state.status === "Complete";
                 const canComplete = canTaskBeCompleted(task, state);
+                const [opened, setOpened] = React.useState(false);
                 return (
                   <Card
                     key={task.id}
@@ -244,98 +258,102 @@ function EmployeeView({
                     radius="md"
                     style={{
                       borderColor: isComplete ? "var(--mantine-color-green-6)" : undefined,
-                      background: isComplete ? "color-mix(in oklab, var(--mantine-color-green-6) 9%, var(--mantine-color-body))" : undefined,
+                      background: isComplete ? "color-mix(in oklab, var(--mantine-color-green-6) 8%, var(--mantine-color-body))" : undefined,
                     }}
                   >
-                    <Grid align="center">
-                      <Grid.Col span={{ base: 12, sm: 6 }}>
-                        <Group gap="sm">
-                          <Badge
-                            radius="xl"
-                            variant="outline"
-                            color={isComplete ? "green" : "gray"}
-                            leftSection={isComplete ? <IconCheck size={14} /> : null}
-                          >
-                            {isComplete ? "Completed" : "Task"}
-                          </Badge>
-                          <div>
-                            <Text fw={600} c={isComplete ? "green.9" : undefined}>{task.title}</Text>
-                            <Text c={isComplete ? "green.9" : "dimmed"} fz="sm">
-                              {task.category} • {task.inputType}
-                              {task.photoRequired ? " • Photo required" : ""}
-                              {task.noteRequired ? " • Note required" : ""}
-                            </Text>
+                    <Group justify="space-between" align="flex-start" wrap="nowrap">
+                      <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                        <ActionIcon variant="subtle" onClick={() => setOpened((v) => !v)} aria-label="Toggle details">
+                          {opened ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+                        </ActionIcon>
+                        <div style={{ minWidth: 0 }}>
+                          <Group gap={6} wrap="wrap">
+                            <Text fw={600} truncate c={isComplete ? "green.9" : undefined}>{task.title}</Text>
                             {state.reviewStatus && (
                               <Badge
-                                mt={6}
                                 variant="outline"
-                                color={
-                                  state.reviewStatus === "Approved"
-                                    ? "green"
-                                    : state.reviewStatus === "Rework"
-                                      ? "yellow"
-                                      : "gray"
-                                }
+                                color={state.reviewStatus === "Approved" ? "green" : state.reviewStatus === "Rework" ? "yellow" : "gray"}
                               >
                                 {state.reviewStatus}
                               </Badge>
                             )}
-                          </div>
-                        </Group>
-                      </Grid.Col>
-
-                      <Grid.Col span={{ base: 12, sm: 6 }}>
-                        <Group gap="xs" wrap="wrap" justify="flex-end">
-                          {task.inputType === "number" && (
-                            <NumberInput
-                              placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
-                              value={state.value ?? ""}
-                              onChange={(v) => updateTaskState(tl.id, task.id, { value: Number(v) })}
-                              disabled={isComplete}
-                              style={{ minWidth: rem(92) }}
-                            />
-                          )}
-
-                          <Button
-                            variant={isComplete ? "outline" : "default"}
-                            color={isComplete ? "green" : undefined}
-                            onClick={() => handleComplete(tl, task)}
-                            disabled={!canComplete || isComplete}
-                          >
-                            {isComplete ? "Completed ✓" : "Mark Complete"}
-                          </Button>
-
-                          <FileButton onChange={(file) => file && handleUpload(tl, task, file)} accept="image/*" disabled={isComplete}>
-                            {(props) => (
-                              <Button variant="default" leftSection={<IconUpload size={16} />} {...props}>
-                                Upload Photo
-                              </Button>
+                            {isComplete && (
+                              <Badge color="green" variant="light" leftSection={<IconCheck size={14} />}>Completed</Badge>
                             )}
-                          </FileButton>
+                          </Group>
+                          <Text c="dimmed" fz="sm" mt={2}>
+                            {task.category} • {task.inputType}
+                            {task.photoRequired ? " • Photo required" : ""}
+                            {task.noteRequired ? " • Note required" : ""}
+                          </Text>
+                        </div>
+                      </Group>
 
-                          <TextInput
-                            placeholder="Add note"
-                            value={state.note}
-                            onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
-                            disabled={isComplete && !task.noteRequired}
-                            style={{ minWidth: rem(180) }}
-                          />
-
-                          <Switch
-                            checked={!!state.na}
-                            onChange={(e) => updateTaskState(tl.id, task.id, { na: e.currentTarget.checked })}
+                      <Group gap="xs" wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }}>
+                        {task.inputType === "number" && (
+                          <NumberInput
+                            placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
+                            value={state.value ?? ""}
+                            onChange={(v) => updateTaskState(tl.id, task.id, { value: Number(v) })}
                             disabled={isComplete}
-                            label="N/A"
+                            style={{ width: rem(96) }}
                           />
-                        </Group>
-                      </Grid.Col>
-                    </Grid>
+                        )}
 
-                    <EvidenceRow state={state} />
+                        <TextInput
+                          placeholder="Add note"
+                          value={state.note}
+                          onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
+                          disabled={isComplete && !task.noteRequired}
+                          style={{ width: rem(180) }}
+                          visibleFrom="sm"
+                        />
+
+                        <FileButton onChange={(file) => file && handleUpload(tl, task, file)} accept="image/*" disabled={isComplete}>
+                          {(props) => (
+                            <Button variant="default" leftSection={<IconUpload size={16} />} {...props}>
+                              Photo
+                            </Button>
+                          )}
+                        </FileButton>
+
+                        <Button
+                          variant={isComplete ? "outline" : "default"}
+                          color={isComplete ? "green" : undefined}
+                          onClick={() => handleComplete(tl, task)}
+                          disabled={!canComplete || isComplete}
+                        >
+                          {isComplete ? "Completed ✓" : "Complete"}
+                        </Button>
+
+                        <Switch
+                          checked={!!state.na}
+                          onChange={(e) => updateTaskState(tl.id, task.id, { na: e.currentTarget.checked })}
+                          disabled={isComplete}
+                          label="N/A"
+                        />
+                      </Group>
+                    </Group>
+
+                    <Collapse in={opened}>
+                      <Divider my={"sm"} />
+                      <Stack gap="xs">
+                        <TextInput
+                          placeholder="Add note"
+                          value={state.note}
+                          onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
+                          disabled={isComplete && !task.noteRequired}
+                          style={{ width: "100%" }}
+                          hiddenFrom="sm"
+                        />
+                        <EvidenceRow state={state} />
+                      </Stack>
+                    </Collapse>
                   </Card>
                 );
               })}
             </Stack>
+            </Collapse>
           </Card>
         );
       })}
