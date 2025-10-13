@@ -29,7 +29,7 @@ export async function listUsers(companyId) {
     .from("app_user")
     .select("*")
     .eq("company_id", cid)
-    .order("email", { ascending: true });
+    .order("display_name", { ascending: true });
   if (error) throw error;
   return data;
 }
@@ -170,6 +170,7 @@ const toUiTemplate = (r) => ({
   requiresApproval: r.requires_approval ?? true,
   signoffMethod: r.signoff_method || "PIN",
   active: r.active !== false,
+  positions: Array.isArray(r.positions) ? r.positions : [],
   tasks: (r.tasklist_task || []).map(toUiTask),
 });
 
@@ -246,6 +247,7 @@ export async function upsertTasklistTemplateWithTasks(tplUi) {
     requires_approval: tplUi.requiresApproval ?? true,
     signoff_method: tplUi.signoffMethod || "PIN",
     active: tplUi.active !== false,
+    positions: Array.isArray(tplUi.positions) ? tplUi.positions : [],
   };
 
   const { data: tplRes, error: tplErr } = await supabase

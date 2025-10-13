@@ -1611,7 +1611,7 @@ function AppInner() {
                   <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
                     <Burger opened={opened} onClick={toggle} aria-label="Open menu" hiddenFrom="sm" />
                     {company.logo ? (
-                      <img src={company.logo} alt="Logo" style={{ width: 28, height: 28, borderRadius: 8, objectFit: "cover" }} />
+                      <img src={company.logo} alt="Logo" style={{ width: 60, height: 60, borderRadius: 8, objectFit: "cover" }} />
                     ) : (
                       <div style={{ width: 28, height: 28, borderRadius: 8, background: company.brandColor }} />
                     )}
@@ -1772,6 +1772,7 @@ function AppInner() {
                     locations={locations}
                     refreshHeaderData={refreshHeaderData}
                     refreshCompanySettings={refreshCompanySettings}
+                    users={employees}
                   />
                 </div>
               )}
