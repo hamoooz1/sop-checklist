@@ -299,3 +299,79 @@ export async function hydrateAll(companyId) {
   ]);
   return { company, locations, users, timeBlocks, templates };
 }
+
+
+// Restock
+export async function listRestockRequests(companyId, { locationId = null, status = null } = {}) {
+  let q = supabase
+    .from('restock_request')
+    .select(`
+      id, company_id, location_id, requested_by, fulfilled_by,
+      status, category, item, quantity, urgency, notes,
+      created_at, fulfilled_at,
+      requester:requested_by ( id, display_name ),
+      fulfiller:fulfilled_by ( id, display_name )
+    `)
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false });
+
+  if (locationId) q = q.eq('location_id', locationId);
+  if (status) q = q.eq('status', status);
+
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
+export async function createRestockRequest({
+  company_id,
+  location_id,
+  category,   // 'food' | 'drinks' | 'supplies'
+  item,
+  quantity = 1,
+  urgency = 'normal',
+  notes = ''
+}) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const requested_by = user?.id ?? null;
+
+  const payload = {
+    company_id,
+    location_id,
+    requested_by,
+    category,
+    item,
+    quantity,
+    urgency,
+    notes,
+    status: 'open'
+  };
+
+  const { data, error } = await supabase
+    .from('restock_request')
+    .insert(payload)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function completeRestockRequest(id) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const fulfilled_by = user?.id ?? null;
+
+  const { data, error } = await supabase
+    .from('restock_request')
+    .update({
+      status: 'completed',
+      fulfilled_by,
+      fulfilled_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}

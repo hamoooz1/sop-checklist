@@ -20,6 +20,7 @@ import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload, IconMapPin, IconUs
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
 import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates } from "./lib/queries.js";
 import BugReport from "./components/BugReport.jsx";
+import { listRestockRequests, createRestockRequest, completeRestockRequest } from "./lib/queries.js";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -195,6 +196,14 @@ function EmployeeView({
   company
 }) {
   const [openLists, setOpenLists] = React.useState({});
+  const [openTasks, setOpenTasks] = React.useState({});
+
+  const isTaskOpen = (tlId, taskId) => !!openTasks[`${tlId}:${taskId}`];
+  const toggleTaskOpen = (tlId, taskId) =>
+    setOpenTasks((prev) => {
+      const k = `${tlId}:${taskId}`;
+      return { ...prev, [k]: !prev[k] };
+    });
 
   return (
     <Stack gap="md">
@@ -250,7 +259,7 @@ function EmployeeView({
                 const state = states.find((s) => s.taskId === task.id);
                 const isComplete = state.status === "Complete";
                 const canComplete = canTaskBeCompleted(task, state);
-                const [opened, setOpened] = React.useState(false);
+                const opened = isTaskOpen(tl.id, task.id);
                 return (
                   <Card
                     key={task.id}
@@ -263,7 +272,7 @@ function EmployeeView({
                   >
                     <Group justify="space-between" align="flex-start" wrap="nowrap">
                       <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                        <ActionIcon variant="subtle" onClick={() => setOpened((v) => !v)} aria-label="Toggle details">
+                        <ActionIcon variant="subtle" onClick={() => toggleTaskOpen(tl.id, task.id)} aria-label="Toggle details">
                           {opened ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
                         </ActionIcon>
                         <div style={{ minWidth: 0 }}>
