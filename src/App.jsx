@@ -16,7 +16,7 @@ import {
   toPublicUrl,         // <-- add
 } from './lib/submissions';
 import { useLocalStorage, useDisclosure } from "@mantine/hooks";
-import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload, IconMapPin, IconUser, IconLayoutGrid, IconLayoutList, IconBug, IconLogout, IconShieldHalf } from "@tabler/icons-react";
+import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload, IconMapPin, IconUser, IconLayoutGrid, IconLayoutList, IconBug, IconLogout, IconShieldHalf, IconFilter } from "@tabler/icons-react";
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
 import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates } from "./lib/queries.js";
 import BugReport from "./components/BugReport.jsx";
@@ -1099,6 +1099,10 @@ function ManagerView({
 
 /** ---------------------- Main App ---------------------- */
 const baseTheme = createTheme({
+  fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+  headings: {
+    fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+  },
   components: {
     Modal: {
       defaultProps: {
@@ -1126,6 +1130,8 @@ function AppInner() {
   const [locations, setLocations] = useState([]);
   const [currentEmployee, setCurrentEmployee] = useState("");
   const [employees, setEmployees] = useState([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [positionFilter, setPositionFilter] = useState("");
   const [company, setCompany] = useState({ id: "", name: "", brandColor: "#0ea5e9", logo: null, timezone: "UTC" });
   const [checklists, setChecklists] = useState({ timeBlocks: [], templates: [], overrides: [] });
   const ModeTabsText = [
@@ -1253,9 +1259,20 @@ function AppInner() {
 
   // Today’s tasklists (from admin templates + ad-hoc)
   const tasklistsToday = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return resolveTasklistsForDayFromLists(checklists, activeLocationId, today, company.timezone);
-  }, [checklists, activeLocationId, company.timezone]);
+    const today = todayISOInTz(company.timezone || 'UTC');
+    const all = resolveTasklistsForDayFromLists(checklists, activeLocationId, today, company.timezone);
+    if (!positionFilter) return all;
+    // Filter templates by positions
+    const pf = String(positionFilter).trim();
+    return all.filter((tl) => {
+      // find template meta to check positions
+      const tpl = (checklists.templates || []).find((t) => t.id === tl.id);
+      const positions = Array.isArray(tpl?.positions) ? tpl.positions : [];
+      if (!pf) return true;
+      // match if template has position equal to selection
+      return positions.map(String).includes(pf);
+    });
+  }, [checklists, activeLocationId, company.timezone, positionFilter]);
 
   useEffect(() => {
     if (!company.id || !activeLocationId || tasklistsToday.length === 0) return;
@@ -1383,6 +1400,18 @@ function AppInner() {
       return next;
     });
   }, [tasklistsToday]);
+
+  // Manager submissions filtered by position (to reflect the same filter globally)
+  const submissionsFilteredByPosition = useMemo(() => {
+    if (!positionFilter) return submissions;
+    const pf = String(positionFilter).trim();
+    const byId = new Map((checklists.templates || []).map(t => [t.id, t]));
+    return submissions.filter((s) => {
+      const tpl = byId.get(s.tasklistId);
+      const positions = Array.isArray(tpl?.positions) ? tpl.positions.map(String) : [];
+      return positions.includes(pf);
+    });
+  }, [submissions, checklists.templates, positionFilter]);
 
   function updateTaskState(tlId, taskId, patch) {
     setWorking((prev) => {
@@ -1594,7 +1623,7 @@ function AppInner() {
   return (
     <MantineProvider theme={baseTheme} forceColorScheme={scheme}>
       <AppShell
-        header={{ height: 100 }}   // NEW: allow extra height when wrapping
+        header={{ height: filtersOpen ? 156 : 100 }}   // expand when filters open
         padding="md"
         withBorder={false}
         styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)" } }}
@@ -1640,6 +1669,9 @@ function AppInner() {
                     <ActionIcon variant="default" title="Employee / Location" onClick={open} hiddenFrom="sm">
                       <IconUser size={16} />
                     </ActionIcon>
+                    <ActionIcon variant="default" title="Filters" onClick={() => setFiltersOpen((v) => !v)}>
+                      <IconFilter size={16} />
+                    </ActionIcon>
                     <ActionIcon variant="default" title="Theme" onClick={() => setScheme(scheme === "dark" ? "light" : "dark")} hiddenFrom="sm">
                       {scheme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
                     </ActionIcon>
@@ -1674,6 +1706,9 @@ function AppInner() {
                       >
                         Logout
                       </Button>
+                      <ActionIcon variant="default" title="Filters" onClick={() => setFiltersOpen((v) => !v)}>
+                        <IconFilter size={16} />
+                      </ActionIcon>
                       <ThemeToggle scheme={scheme} setScheme={setScheme} />
                     </Group>
                   </Group>
@@ -1724,8 +1759,36 @@ function AppInner() {
               </>
             );
           })()}
+          {filtersOpen && (
+            <div style={{ borderTop: "1px solid var(--mantine-color-gray-3)", background: "var(--mantine-color-body)" }}>
+              <Container size="xl">
+                <Group py="sm" gap="sm" wrap="wrap" justify="space-between">
+                  <Group gap="sm" wrap="wrap">
+                    <Select
+                      label="Position"
+                      placeholder="All positions"
+                      value={positionFilter}
+                      onChange={(v) => setPositionFilter(v || "")}
+                      data={Array.from(new Set((checklists.templates || []).flatMap(t => Array.isArray(t.positions) ? t.positions.map(String) : [])))
+                        .filter(Boolean)
+                        .map((p) => ({ value: p, label: p }))}
+                      clearable
+                      searchable
+                      comboboxProps={{ withinPortal: true }}
+                      maw={260}
+                    />
+                  </Group>
+                  <Group gap="xs">
+                    <Button variant="light" onClick={() => setPositionFilter("")}>Clear</Button>
+                  </Group>
+                </Group>
+              </Container>
+            </div>
+          )}
         </AppShell.Header>
 
+
+        
 
         <AppShell.Main>
           {!companyId ? (
@@ -1750,7 +1813,7 @@ function AppInner() {
               )}
               {mode === "manager" && (
                 <ManagerView
-                  submissions={submissions}
+                  submissions={submissionsFilteredByPosition}
                   company={company}
                   checklists={checklists}
                   locations={locations}
