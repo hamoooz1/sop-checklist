@@ -326,14 +326,15 @@ export async function listRestockRequests(companyId, { locationId = null, status
 export async function createRestockRequest({
   company_id,
   location_id,
-  category,   // 'food' | 'drinks' | 'supplies'
+  category,  
   item,
   quantity = 1,
-  urgency = 'normal',
-  notes = ''
+  urgency = 'Normal',
+  notes = '',
+  requested_by: requestedByOverride = null,
 }) {
   const { data: { user } } = await supabase.auth.getUser();
-  const requested_by = user?.id ?? null;
+  const requested_by = requestedByOverride ?? (user?.id ?? null);
 
   const payload = {
     company_id,
@@ -344,7 +345,7 @@ export async function createRestockRequest({
     quantity,
     urgency,
     notes,
-    status: 'open'
+    status: 'Open'
   };
 
   const { data, error } = await supabase
@@ -357,14 +358,16 @@ export async function createRestockRequest({
   return data;
 }
 
-export async function completeRestockRequest(id) {
+export async function completeRestockRequest(arg) {
+  const id = typeof arg === 'object' ? arg.id : arg;
+  const override = typeof arg === 'object' ? (arg.fulfilled_by || null) : null;
   const { data: { user } } = await supabase.auth.getUser();
-  const fulfilled_by = user?.id ?? null;
+  const fulfilled_by = override ?? (user?.id ?? null);
 
   const { data, error } = await supabase
     .from('restock_request')
     .update({
-      status: 'completed',
+      status: 'Completed',
       fulfilled_by,
       fulfilled_at: new Date().toISOString(),
     })

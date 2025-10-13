@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import AdminView from "./AdminView";
-import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse } from "@mantine/core";
+import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea } from "@mantine/core";
 
 import { supabase } from "./lib/supabase.js";
 import {
@@ -18,9 +18,8 @@ import {
 import { useLocalStorage, useDisclosure } from "@mantine/hooks";
 import { IconSun, IconMoon, IconPhoto, IconCheck, IconUpload, IconMapPin, IconUser, IconLayoutGrid, IconLayoutList, IconBug, IconLogout, IconShieldHalf, IconFilter, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
-import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates } from "./lib/queries.js";
+import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates, listRestockRequests, createRestockRequest, completeRestockRequest } from "./lib/queries.js";
 import BugReport from "./components/BugReport.jsx";
-import { listRestockRequests, createRestockRequest, completeRestockRequest } from "./lib/queries.js";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -193,10 +192,39 @@ function EmployeeView({
   setSubmissions,
   setWorking,
   checklists,
-  company
+  company,
+  tab,
+  onRestockOpenCountChange,
+  employees,
+  currentEmployee
 }) {
   const [openLists, setOpenLists] = React.useState({});
   const [openTasks, setOpenTasks] = React.useState({});
+
+  // Restock state
+  const [restock, setRestock] = React.useState({ category: 'Food', item: '', quantity: 1, urgency: 'normal', notes: '', requestedBy: currentEmployee || '' });
+  const [restockList, setRestockList] = React.useState([]);
+  const [loadingRestock, setLoadingRestock] = React.useState(false);
+  const restockLocationId = tasklists[0]?.locationId || null;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (tab !== 'restock' || !company?.id) return;
+      try {
+        setLoadingRestock(true);
+        const rows = await listRestockRequests(company.id, { locationId: restockLocationId, status: null });
+        if (!cancelled) {
+          setRestockList(rows);
+          const count = (rows || []).filter(r => r.status !== 'completed').length;
+          onRestockOpenCountChange?.(count);
+        }
+      } finally {
+        if (!cancelled) setLoadingRestock(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tab, company?.id, restockLocationId]);
 
   const isTaskOpen = (tlId, taskId) => !!openTasks[`${tlId}:${taskId}`];
   const toggleTaskOpen = (tlId, taskId) =>
@@ -209,7 +237,7 @@ function EmployeeView({
     <Stack gap="md">
       <Text fw={700} fz="lg">Today</Text>
 
-      {tasklists.map((tl) => {
+      {tab === 'tasks' && tasklists.map((tl) => {
         const states =
           working?.[tl.id] ??
           tl.tasks.map((t) => ({
@@ -298,7 +326,7 @@ function EmployeeView({
                         </div>
                       </Group>
 
-                      <Group gap="xs" wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }}>
+                      <Group gap="xs" wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }} visibleFrom="sm">
                         {task.inputType === "number" && (
                           <NumberInput
                             placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
@@ -315,7 +343,7 @@ function EmployeeView({
                           onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
                           disabled={isComplete && !task.noteRequired}
                           style={{ width: rem(180) }}
-                          visibleFrom="sm"
+                          
                         />
 
                         <FileButton onChange={(file) => file && handleUpload(tl, task, file)} accept="image/*" disabled={isComplete}>
@@ -355,6 +383,39 @@ function EmployeeView({
                           style={{ width: "100%" }}
                           hiddenFrom="sm"
                         />
+                        {/* Mobile actions */}
+                        <Stack gap="xs" hiddenFrom="sm">
+                          {task.inputType === "number" && (
+                            <NumberInput
+                              placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
+                              value={state.value ?? ""}
+                              onChange={(v) => updateTaskState(tl.id, task.id, { value: Number(v) })}
+                              disabled={isComplete}
+                            />
+                          )}
+                          <FileButton onChange={(file) => file && handleUpload(tl, task, file)} accept="image/*" disabled={isComplete}>
+                            {(props) => (
+                              <Button variant="default" leftSection={<IconUpload size={16} />} fullWidth {...props}>
+                                Upload Photo
+                              </Button>
+                            )}
+                          </FileButton>
+                          <Button
+                            variant={isComplete ? "outline" : "default"}
+                            color={isComplete ? "green" : undefined}
+                            onClick={() => handleComplete(tl, task)}
+                            disabled={!canComplete || isComplete}
+                            fullWidth
+                          >
+                            {isComplete ? "Completed ✓" : "Complete Task"}
+                          </Button>
+                          <Switch
+                            checked={!!state.na}
+                            onChange={(e) => updateTaskState(tl.id, task.id, { na: e.currentTarget.checked })}
+                            disabled={isComplete}
+                            label="N/A"
+                          />
+                        </Stack>
                         <EvidenceRow state={state} />
                       </Stack>
                     </Collapse>
@@ -366,6 +427,144 @@ function EmployeeView({
           </Card>
         );
       })}
+
+      {tab === 'restock' && (
+        <Card withBorder radius="lg" shadow="sm">
+          <Text fw={600} mb="xs">Request restock</Text>
+          <Grid gutter="sm">
+            <Grid.Col span={{ base: 12, sm: 4 }}>
+              <Select
+                label="Category"
+                value={restock.category}
+                onChange={(v) => setRestock((r) => ({ ...r, category: v || 'Food' }))}
+                data={[{ value: 'Food', label: 'Food' }, { value: 'Drinks', label: 'Drinks' }, { value: 'Supplies', label: 'Supplies' }]}
+                comboboxProps={{ withinPortal: true }}
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 4 }}>
+              <TextInput label="Item" value={restock.item} onChange={(e) => setRestock((r) => ({ ...r, item: e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={{ base: 6, sm: 2 }}>
+              <NumberInput label="Qty" min={1} value={restock.quantity} onChange={(v) => setRestock((r) => ({ ...r, quantity: Number(v) || 1 }))} />
+            </Grid.Col>
+            <Grid.Col span={{ base: 6, sm: 2 }}>
+              <Select
+                label="Urgency"
+                value={restock.urgency}
+                onChange={(v) => setRestock((r) => ({ ...r, urgency: v || 'normal' }))}
+                data={[{ value: 'Low', label: 'Low' }, { value: 'Normal', label: 'Normal' }, { value: 'High', label: 'High' }]}
+                comboboxProps={{ withinPortal: true }}
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 4 }}>
+              <Select
+                label="Requested By"
+                value={restock.requestedBy}
+                onChange={(v) => setRestock((r) => ({ ...r, requestedBy: v || '' }))}
+                data={(employees || []).map(u => ({ value: String(u.id), label: u.display_name }))}
+                searchable
+                comboboxProps={{ withinPortal: true }}
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12 }}>
+              <Textarea label="Notes" minRows={2} value={restock.notes} onChange={(e) => setRestock((r) => ({ ...r, notes: e.target.value }))} />
+            </Grid.Col>
+          </Grid>
+          <Group justify="flex-end" mt="sm">
+            <Button
+              onClick={async () => {
+                if (!restock.item.trim()) { alert('Enter an item'); return; }
+                try {
+                  const row = await createRestockRequest({
+                    company_id: company.id,
+                    location_id: restockLocationId,
+                    category: restock.category,
+                    item: restock.item.trim(),
+                    quantity: restock.quantity,
+                    urgency: restock.urgency,
+                    notes: restock.notes.trim(),
+                    requested_by: restock.requestedBy || null,
+                  });
+                  setRestockList((prev) => [row, ...prev]);
+                  setRestock({ category: 'Food', item: '', quantity: 1, urgency: 'normal', notes: '', requestedBy: currentEmployee || '' });
+                } catch (e) {
+                  console.error(e);
+                  alert('Failed to create request');
+                }
+              }}
+            >
+              Submit Request
+            </Button>
+          </Group>
+
+          <Divider my="sm" />
+          <Text fw={600} mb="xs">Open requests</Text>
+          {loadingRestock ? (
+            <Text c="dimmed">Loading…</Text>
+          ) : (
+            <Stack gap="xs">
+              {restockList.filter(r => String(r.status).toLowerCase() !== 'completed').map((r) => (
+                <Card key={r.id} withBorder radius="md">
+                  <Stack gap="xs">
+                    <Group justify="space-between" wrap="wrap">
+                      <div>
+                        <Text fw={600}>{r.item} <Text span c="dimmed">• {r.category}</Text></Text>
+                        <Text c="dimmed" fz="sm">Qty: {r.quantity} • Urgency: {r.urgency}</Text>
+                        {r.notes && <Text c="dimmed" fz="sm">{r.notes}</Text>}
+                      </div>
+                      <Group gap="xs" wrap="wrap">
+                        <Select
+                          placeholder="Fulfilled by"
+                          value={r.fulfilled_by || ''}
+                          onChange={(v) => setRestockList(prev => prev.map(x => x.id === r.id ? { ...x, fulfilled_by: v || null } : x))}
+                          data={(employees || []).map(u => ({ value: String(u.id), label: u.display_name }))}
+                          searchable
+                          comboboxProps={{ withinPortal: true }}
+                          w={220}
+                        />
+                        <Button variant="default" onClick={async () => {
+                          try {
+                            const updated = await completeRestockRequest({ id: r.id, fulfilled_by: r.fulfilled_by || null });
+                            setRestockList(prev => prev.map(x => x.id === r.id ? updated : x));
+                          } catch (e) {
+                            console.error(e);
+                            alert('Failed to complete');
+                          }
+                        }}>Mark Completed</Button>
+                      </Group>
+                    </Group>
+                  </Stack>
+                </Card>
+              ))}
+              {restockList.filter(r => String(r.status).toLowerCase() !== 'completed').length === 0 && (
+                <Text c="dimmed">No open requests.</Text>
+              )}
+            </Stack>
+          )}
+
+          <Divider my="sm" />
+          <Text fw={600} mb="xs">Completed</Text>
+          <Stack gap="xs">
+            {restockList.filter(r => String(r.status).toLowerCase() === 'completed').map((r) => (
+              <Card key={r.id} withBorder radius="md">
+                <Group justify="space-between" wrap="wrap">
+                  <div>
+                    <Text fw={600}>{r.item} <Text span c="dimmed">• {r.category}</Text></Text>
+                    <Text c="dimmed" fz="sm">Qty: {r.quantity} • Urgency: {r.urgency}</Text>
+                    {r.notes && <Text c="dimmed" fz="sm">{r.notes}</Text>}
+                  </div>
+                  <Text c="dimmed" fz="sm">
+                    Fulfilled by: {(employees || []).find(u => String(u.id) === String(r.fulfilled_by))?.display_name || r.fulfilled_by || '—'}
+                  </Text>
+                </Group>
+              </Card>
+            ))}
+            {restockList.filter(r => String(r.status).toLowerCase() === 'completed').length === 0 && (
+              <Text c="dimmed">No completed requests yet.</Text>
+            )}
+          </Stack>
+        </Card>
+      )}
 
       <Card withBorder radius="md" style={{ position: "sticky", zIndex: 1, top: 90 }}>
         <Text fw={600} fz="lg" mb="xs">Review Queue (Rework Needed)</Text>
@@ -1300,6 +1499,7 @@ function AppInner() {
       return positions.map(String).includes(pf);
     });
   }, [checklists, activeLocationId, company.timezone, positionFilter]);
+  const restockLocationId = tasklistsToday[0]?.locationId || null;
 
   useEffect(() => {
     if (!company.id || !activeLocationId || tasklistsToday.length === 0) return;
@@ -1394,6 +1594,8 @@ function AppInner() {
   );
   const [submissions, setSubmissions] = useState([]);
   const [pinModal, setPinModal] = useState({ open: false, onConfirm: null });
+  const [employeeTab, setEmployeeTab] = useState('tasks');
+  const [restockOpenCount, setRestockOpenCount] = useState(0);
 
   useEffect(() => {
     setWorking((prev) => {
@@ -1650,7 +1852,7 @@ function AppInner() {
   return (
     <MantineProvider theme={baseTheme} forceColorScheme={scheme}>
       <AppShell
-        header={{ height: filtersOpen ? 156 : 100 }}   // expand when filters open
+        header={{ height: 100 }}
         padding="md"
         withBorder={false}
         styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)" } }}
@@ -1814,7 +2016,29 @@ function AppInner() {
           )}
         </AppShell.Header>
 
-
+        {/* Page-level tabs sticky under header */}
+        {mode === 'employee' && (
+          <div style={{ position: 'sticky', top: 100, zIndex: 2, background: 'var(--mantine-color-body)', borderBottom: '1px solid var(--mantine-color-gray-3)' }}>
+            <Container size="xl">
+              <Group justify="space-between" align="center" py="xs">
+                <Text fw={700}>Employee</Text>
+                <Tabs value={employeeTab} onChange={setEmployeeTab} variant="pills" keepMounted={false}>
+                  <Tabs.List>
+                    <Tabs.Tab value="tasks">Tasks</Tabs.Tab>
+                    <Tabs.Tab value="restock">
+                      <Group gap={6} wrap="nowrap">
+                        <span>Restock</span>
+                        {restockOpenCount > 0 && (
+                          <span style={{ width: 8, height: 8, borderRadius: 9999, background: 'var(--mantine-color-red-6)', display: 'inline-block' }} />
+                        )}
+                      </Group>
+                    </Tabs.Tab>
+                  </Tabs.List>
+                </Tabs>
+              </Group>
+            </Container>
+          </div>
+        )}
         
 
         <AppShell.Main>
@@ -1836,6 +2060,10 @@ function AppInner() {
                   setSubmissions={setSubmissions}
                   setWorking={setWorking}
                   company={company}
+                  tab={employeeTab}
+                  onRestockOpenCountChange={setRestockOpenCount}
+                  employees={employees}
+                  currentEmployee={currentEmployee}
                 />
               )}
               {mode === "manager" && (
