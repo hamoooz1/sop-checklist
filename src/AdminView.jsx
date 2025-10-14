@@ -274,7 +274,16 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
                     await updateCompany(companyId, { positions: next });
                     setDraft(prev => ({ ...prev, company: { ...prev.company, positions: next } }));
                   }}
-                  onInvite={async (row) => { await createUser({ ...row, company_id: companyId }); await refreshUsers(); refreshHeaderData?.(); }}
+                  onInvite={async (row) => { 
+                    try {
+                      await createUser({ ...row, company_id: companyId }); 
+                      await refreshUsers(); 
+                      refreshHeaderData?.(); 
+                    } catch (error) {
+                      // Re-throw the error so the UI can handle it
+                      throw error;
+                    }
+                  }}
                   onUpdate={async (id, patch) => {
                     if ("pin" in patch) {
                       const digits = String(patch.pin ?? "").replace(/\D/g, "").slice(0, 6);
@@ -960,9 +969,32 @@ function UsersPane({
               onClick={async () => {
                 if (!draft.email.trim() || !draft.display_name.trim() || !draft.pin.trim())
                   return alert("Name, email and PIN are required.");
-                await onInvite(draft);
-                resetDraft();
-                setAddOpen(false);
+                
+                try {
+                  await onInvite(draft);
+                  resetDraft();
+                  setAddOpen(false);
+                } catch (error) {
+                  console.error('Failed to create user:', error);
+                  
+                  // Check for specific database constraint violations
+                  if (error?.code === '23505') {
+                    // Unique constraint violation
+                    if (error?.message?.includes('email') || error?.details?.includes('email')) {
+                      alert('This email address is already in use. Please choose a different email.');
+                    } else if (error?.message?.includes('pin') || error?.details?.includes('pin')) {
+                      alert('This PIN is already in use. Please choose a different PIN.');
+                    } else {
+                      alert('This information conflicts with an existing user. Please check your input.');
+                    }
+                  } else if (error?.message?.includes('duplicate key value violates unique constraint')) {
+                    alert('This email address is already in use. Please choose a different email.');
+                  } else if (error?.message?.includes('violates check constraint')) {
+                    alert('Invalid input. Please check your data and try again.');
+                  } else {
+                    alert('Failed to create user. Please try again.');
+                  }
+                }
               }}
               leftSection={<IconPlus size={16} />}
             >

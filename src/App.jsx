@@ -1,6 +1,6 @@
-import React, { useMemo, useState, useEffect, useCallback } from "react";
-import AdminView from "./AdminView";
-import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea, Popover } from "@mantine/core";
+import React, { useMemo, useState, useEffect, useCallback, Suspense, lazy } from "react";
+const AdminView = lazy(() => import("./AdminView"));
+import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea, Popover, Skeleton } from "@mantine/core";
 
 import { supabase } from "./lib/supabase.js";
 import {
@@ -28,6 +28,19 @@ import BugReport from "./components/BugReport.jsx";
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 /** ---------------------- Utils ---------------------- */
+
+// Debounce utility function
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
 
 function PhotoThumbs({ urls = [], size = 64, title = "Photo" }) {
   const [open, setOpen] = React.useState(false);
@@ -126,9 +139,34 @@ function ThemeToggle({ scheme, setScheme }) {
 }
 
 function EmployeeFiltersForm({ positionFilter, setPositionFilter, templates, onClose }) {
-  const positionOptions = Array.from(
-    new Set((templates || []).flatMap(t => Array.isArray(t.positions) ? t.positions.map(String) : []))
-  ).filter(Boolean).map(p => ({ value: p, label: p }));
+  const [localPositionFilter, setLocalPositionFilter] = useState(positionFilter);
+  
+  // Update local state when positionFilter prop changes
+  useEffect(() => {
+    setLocalPositionFilter(positionFilter);
+  }, [positionFilter]);
+  
+  const positionOptions = useMemo(() => 
+    Array.from(
+      new Set((templates || []).flatMap(t => Array.isArray(t.positions) ? t.positions.map(String) : []))
+    ).filter(Boolean).map(p => ({ value: p, label: p })),
+    [templates]
+  );
+
+  const handleApply = useCallback(() => {
+    setPositionFilter(localPositionFilter);
+    onClose();
+  }, [localPositionFilter, setPositionFilter, onClose]);
+
+  const handleClear = useCallback(() => {
+    setLocalPositionFilter("");
+    setPositionFilter("");
+    onClose();
+  }, [setPositionFilter, onClose]);
+
+  const handleSelectChange = useCallback((v) => {
+    setLocalPositionFilter(v || "");
+  }, []);
 
   return (
     <Stack gap="sm" p="xs" style={{ minWidth: 280 }}>
@@ -136,16 +174,16 @@ function EmployeeFiltersForm({ positionFilter, setPositionFilter, templates, onC
       <Select
         label="Position"
         placeholder="All positions"
-        value={positionFilter}
-        onChange={(v) => setPositionFilter(v || "")}
+        value={localPositionFilter}
+        onChange={handleSelectChange}
         data={positionOptions}
         clearable
         searchable
-        comboboxProps={{ withinPortal: true }}
+        comboboxProps={{ withinPortal: false }}
       />
       <Group justify="space-between" mt="xs">
-        <Button variant="light" onClick={() => setPositionFilter("")}>Clear</Button>
-        <Button onClick={onClose}>Apply</Button>
+        <Button variant="light" onClick={handleClear}>Clear</Button>
+        <Button onClick={handleApply}>Apply</Button>
       </Group>
     </Stack>
   );
@@ -257,6 +295,21 @@ function EmployeeView({
     return () => { cancelled = true; };
   }, [company?.id, restockLocationId]);
 
+  // Debounced restock refresh to prevent rapid-fire updates
+  const debouncedRefreshRestock = useCallback(
+    debounce(async () => {
+      try {
+        const rows = await listRestockRequests(company.id, { locationId: restockLocationId, status: null });
+        setRestockList(rows);
+        const count = (rows || []).filter(r => String(r.status).toLowerCase() !== 'completed').length;
+        onRestockOpenCountChange?.(count);
+      } catch (e) {
+        console.error('Failed to refresh restock list:', e);
+      }
+    }, 300),
+    [company?.id, restockLocationId, onRestockOpenCountChange]
+  );
+
   // Set up real-time subscription for restock requests
   useEffect(() => {
     if (!company?.id) return;
@@ -268,25 +321,13 @@ function EmployeeView({
         schema: 'public',
         table: 'restock_request',
         filter: `company_id=eq.${company.id}`
-      }, (payload) => {
-        // Refresh restock list when any restock request changes
-        (async () => {
-          try {
-            const rows = await listRestockRequests(company.id, { locationId: restockLocationId, status: null });
-            setRestockList(rows);
-            const count = (rows || []).filter(r => String(r.status).toLowerCase() !== 'completed').length;
-            onRestockOpenCountChange?.(count);
-          } catch (e) {
-            console.error('Failed to refresh restock list:', e);
-          }
-        })();
-      })
+      }, debouncedRefreshRestock)
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [company?.id, restockLocationId, onRestockOpenCountChange]);
+  }, [company?.id, debouncedRefreshRestock]);
 
   const isTaskOpen = (tlId, taskId) => !!openTasks[`${tlId}:${taskId}`];
   const toggleTaskOpen = (tlId, taskId) =>
@@ -299,7 +340,28 @@ function EmployeeView({
     <Stack gap="md">
       <Text fw={700} fz="lg">Today</Text>
 
-      {tab === 'tasks' && tasklists.map((tl) => {
+      {tab === 'tasks' && (tasklists.length === 0 ? (
+        // Skeleton loading for tasklists
+        <Stack gap="md">
+          {[1, 2, 3].map((i) => (
+            <Card key={i} withBorder radius="lg" shadow="sm">
+              <Group justify="space-between" align="center">
+                <div>
+                  <Skeleton height={20} width={200} mb="xs" />
+                  <Skeleton height={16} width={150} mb="xs" />
+                  <Skeleton height={16} width={100} />
+                </div>
+                <Skeleton height={36} width={120} />
+              </Group>
+              <Stack gap="xs" mt="md">
+                {[1, 2, 3].map((j) => (
+                  <Skeleton key={j} height={60} radius="md" />
+                ))}
+              </Stack>
+            </Card>
+          ))}
+        </Stack>
+      ) : tasklists.map((tl) => {
         const states =
           working?.[tl.id] ??
           tl.tasks.map((t) => ({
@@ -488,12 +550,22 @@ function EmployeeView({
             </Collapse>
           </Card>
         );
-      })}
+      }))}
 
       {tab === 'restock' && (
         <Card withBorder radius="lg" shadow="sm">
           <Text fw={600} mb="xs">Request restock</Text>
-          <Grid gutter="sm">
+          {loadingRestock ? (
+            <Stack gap="sm">
+              <Skeleton height={40} width="100%" />
+              <Skeleton height={40} width="100%" />
+              <Skeleton height={40} width="100%" />
+              <Skeleton height={80} width="100%" />
+              <Skeleton height={36} width={120} />
+            </Stack>
+          ) : (
+            <>
+              <Grid gutter="sm">
             <Grid.Col span={{ base: 12, sm: 4 }}>
               <Select
                 label="Category"
@@ -631,6 +703,8 @@ function EmployeeView({
               <Text c="dimmed">No completed requests yet.</Text>
             )}
           </Stack>
+            </>
+          )}
         </Card>
       )}
 
@@ -1462,6 +1536,21 @@ function AppInner() {
   // initial load
   useEffect(() => { refreshHeaderData(); loadCompany(); }, [refreshHeaderData, loadCompany]);
 
+  // Debounced refresh functions to prevent rapid-fire updates
+  const debouncedRefreshHeaderData = useCallback(
+    debounce(() => {
+      refreshHeaderData();
+    }, 300),
+    [refreshHeaderData]
+  );
+
+  const debouncedLoadCompany = useCallback(
+    debounce(() => {
+      loadCompany();
+    }, 300),
+    [loadCompany]
+  );
+
   // live updates when Admin creates/edits/deletes
   // realtime for header lists (scoped)
   useEffect(() => {
@@ -1469,12 +1558,12 @@ function AppInner() {
     if (!companyId) return;
     const ch = supabase
       .channel(`header-sync:${companyId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "location", filter: `company_id=eq.${companyId}` }, refreshHeaderData)
-      .on("postgres_changes", { event: "*", schema: "public", table: "app_user", filter: `company_id=eq.${companyId}` }, refreshHeaderData)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "company", filter: `id=eq.${companyId}` }, loadCompany)
+      .on("postgres_changes", { event: "*", schema: "public", table: "location", filter: `company_id=eq.${companyId}` }, debouncedRefreshHeaderData)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_user", filter: `company_id=eq.${companyId}` }, debouncedRefreshHeaderData)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "company", filter: `id=eq.${companyId}` }, debouncedLoadCompany)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [companyId, refreshHeaderData, loadCompany]);
+  }, [companyId, debouncedRefreshHeaderData, debouncedLoadCompany]);
 
   // checklists data (time blocks + templates)
   const loadChecklists = useCallback(async () => {
@@ -1488,24 +1577,41 @@ function AppInner() {
 
   useEffect(() => { loadChecklists(); }, [loadChecklists]);
 
+  // Debounced load checklists to prevent rapid-fire updates
+  const debouncedLoadChecklists = useCallback(
+    debounce(() => {
+      loadChecklists();
+    }, 300),
+    [loadChecklists]
+  );
+
   useEffect(() => {
     if (!companyId) return;
     const ch = supabase
       .channel(`checklists-sync:${companyId}`) // [COMPANY_SCOPE]
-      .on("postgres_changes", { event: "*", schema: "public", table: "time_block", filter: `company_id=eq.${companyId}` }, loadChecklists)
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_template", filter: `company_id=eq.${companyId}` }, loadChecklists)
-      // If task rows don’t have company_id, add a trigger/column or skip this filter.
+      .on("postgres_changes", { event: "*", schema: "public", table: "time_block", filter: `company_id=eq.${companyId}` }, debouncedLoadChecklists)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasklist_template", filter: `company_id=eq.${companyId}` }, debouncedLoadChecklists)
+      // If task rows don't have company_id, add a trigger/column or skip this filter.
       .on("postgres_changes", {
         event: "*", schema: "public", table: "tasklist_task",
         filter: `company_id=eq.${companyId}`
-      }, loadChecklists)
+      }, debouncedLoadChecklists)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [companyId, loadChecklists]);
+  }, [companyId, debouncedLoadChecklists]);
 
-  // Sets the brand color to whatever the DB has it as
+  // Sets the brand color to whatever the DB has it as - optimized to prevent forced reflows
   useEffect(() => {
-    document.documentElement.style.setProperty("--brand", company.brandColor || "#0ea5e9");
+    // Use requestAnimationFrame to defer DOM updates and prevent forced reflows
+    const updateBrandColor = () => {
+      document.documentElement.style.setProperty("--brand", company.brandColor || "#0ea5e9");
+    };
+    
+    if (window.requestAnimationFrame) {
+      window.requestAnimationFrame(updateBrandColor);
+    } else {
+      setTimeout(updateBrandColor, 0);
+    }
   }, [company.brandColor]);
 
   // Persisted scheme (UI preference)
@@ -1514,19 +1620,33 @@ function AppInner() {
     defaultValue: "light",
   });
 
-  // Keep activeLocation valid when Admin edits locations
-  useEffect(() => {
+  // Keep activeLocation valid when Admin edits locations - optimized with useMemo
+  const validActiveLocationId = useMemo(() => {
     if (!locations.find((l) => String(l.id) === String(activeLocationId))) {
-      setActiveLocationId(locations[0]?.id ? String(locations[0].id) : "");
+      return locations[0]?.id ? String(locations[0].id) : "";
     }
+    return activeLocationId;
   }, [locations, activeLocationId]);
 
-  // Keep currentEmployee valid when Admin edits Users
   useEffect(() => {
-    if (!employees.find((u) => String(u.id) === String(currentEmployee))) {
-      setCurrentEmployee(employees[0]?.id ? String(employees[0].id) : "");
+    if (validActiveLocationId !== activeLocationId) {
+      setActiveLocationId(validActiveLocationId);
     }
+  }, [validActiveLocationId, activeLocationId]);
+
+  // Keep currentEmployee valid when Admin edits Users - optimized with useMemo
+  const validCurrentEmployee = useMemo(() => {
+    if (!employees.find((u) => String(u.id) === String(currentEmployee))) {
+      return employees[0]?.id ? String(employees[0].id) : "";
+    }
+    return currentEmployee;
   }, [employees, currentEmployee]);
+
+  useEffect(() => {
+    if (validCurrentEmployee !== currentEmployee) {
+      setCurrentEmployee(validCurrentEmployee);
+    }
+  }, [validCurrentEmployee, currentEmployee]);
   // Get today's date in the given timezone
   function todayISOInTz(tz) {
     // 'en-CA' -> 'YYYY-MM-DD'
@@ -1551,21 +1671,39 @@ function AppInner() {
     return () => clearInterval(id);
   }, [company.timezone]);
 
-  // Today’s tasklists (from admin templates + ad-hoc)
-  const tasklistsToday = useMemo(() => {
-    const today = todayISOInTz(company.timezone || 'UTC');
-    const all = resolveTasklistsForDayFromLists(checklists, activeLocationId, today, company.timezone);
-    if (!positionFilter) return all;
-    // Filter templates by positions
-    const pf = String(positionFilter).trim();
-    return all.filter((tl) => {
-      // find template meta to check positions
-      const tpl = (checklists.templates || []).find((t) => t.id === tl.id);
-      const positions = Array.isArray(tpl?.positions) ? tpl.positions : [];
-      if (!pf) return true;
-      // match if template has position equal to selection
-      return positions.map(String).includes(pf);
-    });
+  // Today's tasklists (from admin templates + ad-hoc) - optimized with requestIdleCallback
+  const [tasklistsToday, setTasklistsToday] = useState([]);
+  
+  useEffect(() => {
+    const computeTasklists = () => {
+      const today = todayISOInTz(company.timezone || 'UTC');
+      const all = resolveTasklistsForDayFromLists(checklists, activeLocationId, today, company.timezone);
+      if (!positionFilter) return all;
+      // Filter templates by positions
+      const pf = String(positionFilter).trim();
+      return all.filter((tl) => {
+        // find template meta to check positions
+        const tpl = (checklists.templates || []).find((t) => t.id === tl.id);
+        const positions = Array.isArray(tpl?.positions) ? tpl.positions : [];
+        if (!pf) return true;
+        // match if template has position equal to selection
+        return positions.map(String).includes(pf);
+      });
+    };
+
+    // Use requestIdleCallback to defer computation when browser is idle
+    if (window.requestIdleCallback) {
+      const idleCallback = window.requestIdleCallback(() => {
+        setTasklistsToday(computeTasklists());
+      }, { timeout: 100 });
+      return () => window.cancelIdleCallback(idleCallback);
+    } else {
+      // Fallback for browsers without requestIdleCallback
+      const timeoutId = setTimeout(() => {
+        setTasklistsToday(computeTasklists());
+      }, 0);
+      return () => clearTimeout(timeoutId);
+    }
   }, [checklists, activeLocationId, company.timezone, positionFilter]);
   const restockLocationId = tasklistsToday[0]?.locationId || null;
 
@@ -1574,10 +1712,10 @@ function AppInner() {
 
     let cancelled = false;
 
-    (async () => {
+    const processWorkingState = async () => {
       const dateISO = todayISOInTz(company.timezone || 'UTC');
 
-      // fetch all current tasklists’ server state in parallel
+      // fetch all current tasklists' server state in parallel
       const results = await Promise.all(
         tasklistsToday.map(tl =>
           fetchSubmissionAndTasks({
@@ -1625,8 +1763,20 @@ function AppInner() {
         });
       }
 
-      setWorking(nextWorking);
-    })();
+      // Use requestIdleCallback to defer state update when browser is idle
+      if (window.requestIdleCallback) {
+        window.requestIdleCallback(() => {
+          if (!cancelled) setWorking(nextWorking);
+        }, { timeout: 50 });
+      } else {
+        // Fallback for browsers without requestIdleCallback
+        setTimeout(() => {
+          if (!cancelled) setWorking(nextWorking);
+        }, 0);
+      }
+    };
+
+    processWorkingState();
 
     return () => { cancelled = true; };
   }, [supabase, company.id, company.timezone, tasklistsToday]);
@@ -1651,23 +1801,17 @@ function AppInner() {
     return { id: taskId, title: taskId, inputType: "checkbox" };
   }
 
-  // Working state (per tasklist)
-  const [working, setWorking] = useState(() =>
-    tasklistsToday.reduce((acc, tl) => {
-      acc[tl.id] = tl.tasks.map((t) => ({
-        taskId: t.id, status: "Incomplete", value: null, note: "", photos: [], na: false, reviewStatus: "Pending",
-      }));
-      return acc;
-    }, {})
-  );
+  // Working state (per tasklist) - optimized initialization
+  const [working, setWorking] = useState({});
   const [submissions, setSubmissions] = useState([]);
   const [pinModal, setPinModal] = useState({ open: false, onConfirm: null });
   const [employeeTab, setEmployeeTab] = useState('tasks');
   const [restockOpenCount, setRestockOpenCount] = useState(0);
 
-  useEffect(() => {
-    setWorking((prev) => {
-      const next = { ...prev };
+  // Optimized working state synchronization with useMemo
+  const optimizedWorkingState = useMemo(() => {
+    return (prevWorking) => {
+      const next = { ...prevWorking };
 
       tasklistsToday.forEach((tl) => {
         const existing = next[tl.id] ?? [];
@@ -1695,8 +1839,12 @@ function AppInner() {
       });
 
       return next;
-    });
+    };
   }, [tasklistsToday]);
+
+  useEffect(() => {
+    setWorking(optimizedWorkingState);
+  }, [optimizedWorkingState]);
 
   // Manager submissions filtered by position (to reflect the same filter globally)
   const submissionsFilteredByPosition = useMemo(() => {
@@ -2124,7 +2272,7 @@ function AppInner() {
                   withArrow
                   shadow="md"
                   withinPortal
-                  trapFocus
+                  closeOnClickOutside={false}
                   transitionProps={{ transition: 'pop', duration: 120 }}
                   visibleFrom="sm"
                 >
@@ -2132,8 +2280,8 @@ function AppInner() {
                     <ActionIcon
                       variant="default"
                       title="Filters"
-                      onClick={() => setFiltersOpen((v) => !v)}
-                      aria-label="Toggle filters"
+                      onClick={() => setFiltersOpen(true)}
+                      aria-label="Open filters"
                     >
                       <IconFilter size={16} />
                     </ActionIcon>
@@ -2221,17 +2369,19 @@ function AppInner() {
 
               {mode === "admin" && (
                 <div style={{ paddingInline: "1px", paddingTop: 0, paddingBottom: "16px" }}>
-                  <AdminView
-                    companyId={company.id}
-                    tasklists={tasklistsToday}
-                    onReloadChecklists={loadChecklists}
-                    submissions={submissions}
-                    onBrandColorChange={() => { }}
-                    locations={locations}
-                    refreshHeaderData={refreshHeaderData}
-                    refreshCompanySettings={refreshCompanySettings}
-                    users={employees}
-                  />
+                  <Suspense fallback={<Center mih="60dvh"><Loader /></Center>}>
+                    <AdminView
+                      companyId={company.id}
+                      tasklists={tasklistsToday}
+                      onReloadChecklists={loadChecklists}
+                      submissions={submissions}
+                      onBrandColorChange={() => { }}
+                      locations={locations}
+                      refreshHeaderData={refreshHeaderData}
+                      refreshCompanySettings={refreshCompanySettings}
+                      users={employees}
+                    />
+                  </Suspense>
                 </div>
               )}
 
