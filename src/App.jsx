@@ -237,16 +237,17 @@ function EmployeeView({
   const [loadingRestock, setLoadingRestock] = React.useState(false);
   const restockLocationId = tasklists[0]?.locationId || null;
 
+  // Load restock data on app start and when dependencies change
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (tab !== 'restock' || !company?.id) return;
+      if (!company?.id) return;
       try {
         setLoadingRestock(true);
         const rows = await listRestockRequests(company.id, { locationId: restockLocationId, status: null });
         if (!cancelled) {
           setRestockList(rows);
-          const count = (rows || []).filter(r => r.status !== 'completed').length;
+          const count = (rows || []).filter(r => String(r.status).toLowerCase() !== 'completed').length;
           onRestockOpenCountChange?.(count);
         }
       } finally {
@@ -254,7 +255,38 @@ function EmployeeView({
       }
     })();
     return () => { cancelled = true; };
-  }, [tab, company?.id, restockLocationId]);
+  }, [company?.id, restockLocationId]);
+
+  // Set up real-time subscription for restock requests
+  useEffect(() => {
+    if (!company?.id) return;
+    
+    const channel = supabase
+      .channel(`restock-sync:${company.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'restock_request',
+        filter: `company_id=eq.${company.id}`
+      }, (payload) => {
+        // Refresh restock list when any restock request changes
+        (async () => {
+          try {
+            const rows = await listRestockRequests(company.id, { locationId: restockLocationId, status: null });
+            setRestockList(rows);
+            const count = (rows || []).filter(r => String(r.status).toLowerCase() !== 'completed').length;
+            onRestockOpenCountChange?.(count);
+          } catch (e) {
+            console.error('Failed to refresh restock list:', e);
+          }
+        })();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [company?.id, restockLocationId, onRestockOpenCountChange]);
 
   const isTaskOpen = (tlId, taskId) => !!openTasks[`${tlId}:${taskId}`];
   const toggleTaskOpen = (tlId, taskId) =>
@@ -516,6 +548,9 @@ function EmployeeView({
                     requested_by: restock.requestedBy || null,
                   });
                   setRestockList((prev) => [row, ...prev]);
+                  // Immediately update the count locally for better responsiveness
+                  const newCount = restockList.filter(r => String(r.status).toLowerCase() !== 'completed').length + 1;
+                  onRestockOpenCountChange?.(newCount);
                   setRestock({ category: 'Food', item: '', quantity: 1, urgency: 'normal', notes: '', requestedBy: currentEmployee || '' });
                 } catch (e) {
                   console.error(e);
@@ -556,6 +591,9 @@ function EmployeeView({
                           try {
                             const updated = await completeRestockRequest({ id: r.id, fulfilled_by: r.fulfilled_by || null });
                             setRestockList(prev => prev.map(x => x.id === r.id ? updated : x));
+                            // Immediately update the count locally for better responsiveness
+                            const newCount = Math.max(0, restockList.filter(x => x.id !== r.id && String(x.status).toLowerCase() !== 'completed').length);
+                            onRestockOpenCountChange?.(newCount);
                           } catch (e) {
                             console.error(e);
                             alert('Failed to complete');

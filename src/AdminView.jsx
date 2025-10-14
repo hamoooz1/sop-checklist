@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useMemo } from "react";
+import React, { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import {
   Card, Stack, Group, Text, Button, TextInput, ColorInput, Select, MultiSelect,
   NumberInput, Switch, FileButton, Badge, Table, ScrollArea, Divider,
@@ -16,6 +16,34 @@ import {
   listTimeBlocks, upsertTimeBlock, removeTimeBlock,
   listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
 } from "./lib/queries.js";
+
+// Custom hook for debounced updates
+function useDebouncedUpdate(updateFn, delay = 500) {
+  const timeoutRef = useRef(null);
+  
+  const debouncedUpdate = useCallback((id, patch) => {
+    // Clear existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    
+    // Set new timeout
+    timeoutRef.current = setTimeout(() => {
+      updateFn(id, patch);
+    }, delay);
+  }, [updateFn, delay]);
+  
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+  
+  return debouncedUpdate;
+}
 
 export default function AdminView({ companyId, refreshHeaderData, refreshCompanySettings, onReloadChecklists, employees }) {
 
@@ -560,20 +588,43 @@ function LocationsPane({ locations, onAdd, onUpdate, onDelete, companyId }) {
       </ScrollArea.Autosize>
 
 
-      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add location" centered fullScreen>
-        <Stack>
-          <TextInput label="Name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add location" centered size="md">
+        <Stack gap="md">
+          <TextInput 
+            label="Location Name" 
+            placeholder="Main Store, Downtown Branch, etc."
+            value={draft.name} 
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            required
+          />
           <Select
             label="Timezone"
             value={draft.timezone}
-            data={["America/Los_Angeles", "America/Vancouver", "America/New_York", "UTC"]}
+            data={[
+              { value: "America/Los_Angeles", label: "Pacific Time (Los Angeles)" },
+              { value: "America/Vancouver", label: "Pacific Time (Vancouver)" },
+              { value: "America/New_York", label: "Eastern Time (New York)" },
+              { value: "UTC", label: "UTC (Coordinated Universal Time)" }
+            ]}
             onChange={(v) => setDraft({ ...draft, timezone: v })}
             comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+            required
           />
 
-          <Group justify="flex-end">
-            <Button onClick={async () => { await onAdd(draft); setAddOpen(false); setDraft({ name: "", timezone: "America/Los_Angeles", company_id: companyId }); }}>
-              Add
+          <Group justify="flex-end" mt="lg">
+            <Button 
+              onClick={async () => { 
+                if (!draft.name.trim()) {
+                  alert("Location name is required.");
+                  return;
+                }
+                await onAdd(draft); 
+                setAddOpen(false); 
+                setDraft({ name: "", timezone: "America/Los_Angeles", company_id: companyId }); 
+              }}
+              leftSection={<IconPlus size={16} />}
+            >
+              Add Location
             </Button>
           </Group>
         </Stack>
@@ -592,6 +643,8 @@ function UsersPane({
   positionOptions,         // ['Cook', 'Cashier', ...] from draft.company.positions
   onAddPosition,           // async (label) => { await updateCompany(...{positions}); setDraft(...); }
 }) {
+  // Create debounced version of onUpdate for text inputs
+  const debouncedUpdate = useDebouncedUpdate(onUpdate, 800);
   const [addOpen, setAddOpen] = useState(false);
 
   // One shared search value is fine (only one combobox is open at a time)
@@ -691,7 +744,7 @@ function UsersPane({
                 <Table.Td>
                   <TextInput
                     value={u.display_name ?? ""}
-                    onChange={(e) => onUpdate(u.id, { display_name: e.currentTarget.value })}
+                    onChange={(e) => debouncedUpdate(u.id, { display_name: e.currentTarget.value })}
                     w="100%"
                   />
                 </Table.Td>
@@ -699,7 +752,7 @@ function UsersPane({
                 <Table.Td>
                   <TextInput
                     value={u.email ?? ""}
-                    onChange={(e) => onUpdate(u.id, { email: e.currentTarget.value })}
+                    onChange={(e) => debouncedUpdate(u.id, { email: e.currentTarget.value })}
                     w="100%"
                   />
                 </Table.Td>
@@ -752,14 +805,14 @@ function UsersPane({
                     value={(u.pin ?? "").toString()}
                     onChange={(e) => {
                       const next = e.currentTarget.value.replace(/\D/g, "").slice(0, 6);
-                      onUpdate(u.id, { pin: next });
+                      debouncedUpdate(u.id, { pin: next });
                     }}
                     onPaste={(e) => {
                       e.preventDefault();
                       const text = (e.clipboardData.getData("text") || "")
                         .replace(/\D/g, "")
                         .slice(0, 6);
-                      onUpdate(u.id, { pin: text });
+                      debouncedUpdate(u.id, { pin: text });
                     }}
                     onBeforeInput={(e) => {
                       const target = e.currentTarget;
@@ -803,37 +856,41 @@ function UsersPane({
 
 
       {/* Add user modal */}
-      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add user" centered fullScreen>
-        <Stack gap="sm">
-          <Group grow wrap="wrap">
+      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add user" centered size="lg">
+        <Stack gap="md">
+          <Group grow>
             <TextInput
-              label="Name"
+              label="Full Name"
               placeholder="John Doe"
               value={draft.display_name}
               onChange={(e) => setDraft({ ...draft, display_name: e.currentTarget.value })}
+              required
             />
             <TextInput
-              label="Email"
+              label="Email Address"
               placeholder="person@company.com"
               value={draft.email}
               onChange={(e) => setDraft({ ...draft, email: e.currentTarget.value })}
+              required
             />
           </Group>
 
-          <Group grow wrap="nowrap">
+          <Group grow>
             <Select
               label="Role"
               value={draft.role}
               onChange={(v) => setDraft({ ...draft, role: v })}
               data={roleOptions}
               comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+              required
             />
             <Select
-              label="Assign to location"
+              label="Location"
               data={locationOptions}
               value={draft.location}
               onChange={(v) => setDraft({ ...draft, location: v })}
               comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+              required
             />
           </Group>
 
@@ -860,9 +917,9 @@ function UsersPane({
             }}
           />
 
-          <Group grow wrap="nowrap">
+          <Group grow>
             <TextInput
-              label="PIN"
+              label="PIN (for kiosk access)"
               placeholder="123456"
               value={draft.pin ?? ""}
               onChange={(e) =>
@@ -887,15 +944,18 @@ function UsersPane({
               inputMode="numeric"
               pattern="\d*"
               maxLength={6}
+              required
             />
-            <Switch
-              label="Active"
-              checked={draft.is_active}
-              onChange={(e) => setDraft({ ...draft, is_active: e.currentTarget.checked })}
-            />
+            <div style={{ display: 'flex', alignItems: 'end', paddingBottom: '4px' }}>
+              <Switch
+                label="Active user"
+                checked={draft.is_active}
+                onChange={(e) => setDraft({ ...draft, is_active: e.currentTarget.checked })}
+              />
+            </div>
           </Group>
 
-          <Group justify="flex-end" mt="xs">
+          <Group justify="flex-end" mt="lg">
             <Button
               onClick={async () => {
                 if (!draft.email.trim() || !draft.display_name.trim() || !draft.pin.trim())
@@ -1134,16 +1194,44 @@ function ChecklistsPane({
             </Table.Tbody>
           </Table>
 
-          <Modal opened={tbOpen} onClose={() => setTbOpen(false)} title="Time block" centered fullScreen>
-            <Stack>
-              <TextInput label="Name" value={tbDraft.name} onChange={(e) => setTbDraft({ ...tbDraft, name: e.target.value })} />
+          <Modal opened={tbOpen} onClose={() => setTbOpen(false)} title="Time Block" centered size="md">
+            <Stack gap="md">
+              <TextInput 
+                label="Time Block Name" 
+                placeholder="Morning Shift, Evening Shift, etc."
+                value={tbDraft.name} 
+                onChange={(e) => setTbDraft({ ...tbDraft, name: e.target.value })}
+                required
+              />
               <Group grow>
-                <TextInput label="Start (HH:MM)" value={tbDraft.start} onChange={(e) => setTbDraft({ ...tbDraft, start: e.target.value })} />
-                <TextInput label="End (HH:MM)" value={tbDraft.end} onChange={(e) => setTbDraft({ ...tbDraft, end: e.target.value })} />
+                <TextInput 
+                  label="Start Time" 
+                  placeholder="09:00"
+                  value={tbDraft.start} 
+                  onChange={(e) => setTbDraft({ ...tbDraft, start: e.target.value })}
+                  required
+                />
+                <TextInput 
+                  label="End Time" 
+                  placeholder="17:00"
+                  value={tbDraft.end} 
+                  onChange={(e) => setTbDraft({ ...tbDraft, end: e.target.value })}
+                  required
+                />
               </Group>
-              <Group justify="flex-end">
-                <Button onClick={() => { saveTimeBlock(tbDraft); setTbOpen(false); }}>
-                  Save
+              <Group justify="flex-end" mt="lg">
+                <Button 
+                  onClick={() => { 
+                    if (!tbDraft.name.trim() || !tbDraft.start.trim() || !tbDraft.end.trim()) {
+                      alert("Name, start time, and end time are required.");
+                      return;
+                    }
+                    saveTimeBlock(tbDraft); 
+                    setTbOpen(false); 
+                  }}
+                  leftSection={<IconDeviceFloppy size={16} />}
+                >
+                  Save Time Block
                 </Button>
               </Group>
             </Stack>
@@ -1213,62 +1301,86 @@ function ChecklistsPane({
           <Modal
             opened={createTplOpen || editTplOpen}
             onClose={() => { setCreateTplOpen(false); setEditTplOpen(false); }}
-            title="Template"
+            title={createTplOpen ? "Create Template" : "Edit Template"}
             centered
-            fullScreen
+            size="xl"
           >
-            <Stack gap="sm">
-              <TextInput label="Template name" value={tplDraft.name} onChange={(e) => setTplDraft({ ...tplDraft, name: e.target.value })} />
-              <Group grow wrap="nowrap">
+            <Stack gap="md">
+              <TextInput 
+                label="Template Name" 
+                placeholder="Opening Checklist, Closing Procedures, etc."
+                value={tplDraft.name} 
+                onChange={(e) => setTplDraft({ ...tplDraft, name: e.target.value })}
+                required
+              />
+              
+              <Group grow>
                 <Select
                   label="Location"
                   value={tplDraft.locationId}
                   onChange={(v) => setTplDraft({ ...tplDraft, locationId: v })}
                   data={locationOptions}
                   comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+                  required
                 />
                 <Select
-                  label="Time block"
+                  label="Time Block"
                   value={tplDraft.timeBlockId}
                   onChange={(v) => setTplDraft({ ...tplDraft, timeBlockId: v })}
                   data={timeBlockOptions}
                   comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+                  required
                 />
               </Group>
 
-              {/* Positions from company table + create support */}
-              <MultiSelect
-                label="Positions (who should see this?)"
-                data={positionSelectOptions}
-                value={(tplDraft.positions || []).map(String)}
-                searchable
-                clearable
-                searchValue={posSearchTpl}
-                onSearchChange={setPosSearchTpl}
-                comboboxProps={{ withinPortal: true, zIndex: 11000 }}
-                onChange={async (vals) => {
-                  const last = vals[vals.length - 1];
-                  if (last && last.startsWith("__create__:")) {
-                    const label = last.replace("__create__:", "").trim();
-                    if (label) {
-                      await onAddPosition?.(label);      // persists to company.positions
-                      const replaced = vals.filter(v => v !== last).concat(label);
-                      setTplDraft((d) => ({ ...d, positions: replaced }));
-                      setPosSearchTpl("");
-                      return;
+              <Group grow>
+                {/* Positions from company table + create support */}
+                <MultiSelect
+                  label="Positions (who should see this?)"
+                  placeholder="Select positions or leave empty for all"
+                  data={positionSelectOptions}
+                  value={(tplDraft.positions || []).map(String)}
+                  searchable
+                  clearable
+                  searchValue={posSearchTpl}
+                  onSearchChange={setPosSearchTpl}
+                  comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+                  onChange={async (vals) => {
+                    const last = vals[vals.length - 1];
+                    if (last && last.startsWith("__create__:")) {
+                      const label = last.replace("__create__:", "").trim();
+                      if (label) {
+                        await onAddPosition?.(label);      // persists to company.positions
+                        const replaced = vals.filter(v => v !== last).concat(label);
+                        setTplDraft((d) => ({ ...d, positions: replaced }));
+                        setPosSearchTpl("");
+                        return;
+                      }
                     }
-                  }
-                  setTplDraft((d) => ({ ...d, positions: vals }));
-                }}
-              />
+                    setTplDraft((d) => ({ ...d, positions: vals }));
+                  }}
+                />
 
-              <MultiSelect
-                label="Days of week (0=Sun...6=Sat)"
-                data={["0", "1", "2", "3", "4", "5", "6"].map(x => ({ value: x, label: x }))}
-                value={tplDraft.recurrence.map(String)}
-                onChange={(arr) => setTplDraft({ ...tplDraft, recurrence: (arr || []).map(x => Number(x)) })}
-              />
+                <MultiSelect
+                  label="Days of Week"
+                  placeholder="Select days"
+                  data={[
+                    { value: "0", label: "Sunday" },
+                    { value: "1", label: "Monday" },
+                    { value: "2", label: "Tuesday" },
+                    { value: "3", label: "Wednesday" },
+                    { value: "4", label: "Thursday" },
+                    { value: "5", label: "Friday" },
+                    { value: "6", label: "Saturday" }
+                  ]}
+                  value={tplDraft.recurrence.map(String)}
+                  onChange={(arr) => setTplDraft({ ...tplDraft, recurrence: (arr || []).map(x => Number(x)) })}
+                  required
+                />
+              </Group>
 
+              <Divider label="Tasks" labelPosition="left" />
+              
               <TaskEditor
                 tasks={tplDraft.tasks}
                 onAdd={(t) => addTaskToDraftTemplate(t)}
@@ -1276,15 +1388,20 @@ function ChecklistsPane({
                 onRemove={(id) => removeTaskFromDraftTemplate(id)}
               />
 
-              <Group justify="flex-end">
+              <Group justify="flex-end" mt="lg">
                 <Button
                   onClick={() => {
+                    if (!tplDraft.name.trim() || !tplDraft.locationId || !tplDraft.timeBlockId || tplDraft.recurrence.length === 0) {
+                      alert("Template name, location, time block, and at least one day are required.");
+                      return;
+                    }
                     saveTemplateToDb(tplDraft, createTplOpen ? "create" : "update");
                     setCreateTplOpen(false);
                     setEditTplOpen(false);
                   }}
+                  leftSection={<IconDeviceFloppy size={16} />}
                 >
-                  Save template
+                  {createTplOpen ? "Create Template" : "Save Changes"}
                 </Button>
               </Group>
             </Stack>
