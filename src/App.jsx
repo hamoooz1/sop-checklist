@@ -1,10 +1,11 @@
 import React, { useMemo, useState, useEffect, useCallback, Suspense, lazy } from "react";
 const AdminView = lazy(() => import("./AdminView"));
-import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea, Popover, Skeleton } from "@mantine/core";
+import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea, Popover, Skeleton, useMantineColorScheme, useComputedColorScheme } from "@mantine/core";
 
 import { supabase } from "./lib/supabase.js";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  PieChart, Pie, Cell, Legend, LineChart, Line
 } from "recharts";
 import {
   fetchSubmissionAndTasks,
@@ -248,6 +249,335 @@ function EvidenceRow({ state }) {
   );
 }
 
+/** ---------------------- Task Grouping Components ---------------------- */
+function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, updateTaskState, handleComplete, handleUpload, getTimeBlockLabel, signoff, groupBy }) {
+  const [isExpanded, setIsExpanded] = React.useState(true);
+  const { colorScheme } = useMantineColorScheme();
+  const computed = useComputedColorScheme('light');
+  const isDark = computed === 'dark';
+  
+  const completedCount = tasks.filter(task => {
+    const state = states.find(s => s.taskId === task.id);
+    return state?.status === "Complete" || state?.na;
+  }).length;
+  
+  const totalCount = tasks.length;
+  const progressPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  
+  // Check if all tasks in this group can be submitted
+  const canSubmit = tasks.every((task) => {
+    const state = states.find((s) => s.taskId === task.id);
+    return (state?.status === "Complete" || state?.na) && canTaskBeCompleted(task, state);
+  });
+  
+  return (
+    <Card withBorder radius="lg" shadow="sm" style={{ marginBottom: '1rem' }}>
+      <Card.Section withBorder inheritPadding py="sm" style={{ 
+        background: progressPercentage === 100 
+          ? (isDark ? 'var(--mantine-color-green-9)' : 'var(--mantine-color-green-0)')
+          : (isDark ? 'var(--mantine-color-dark-6)' : 'var(--mantine-color-gray-1)'),
+        borderColor: progressPercentage === 100 
+          ? 'var(--mantine-color-green-6)' 
+          : (isDark ? 'var(--mantine-color-dark-4)' : 'var(--mantine-color-gray-4)')
+      }}>
+        <Group justify="space-between" align="center">
+          <Group gap="sm" align="center">
+            <ActionIcon
+              variant="subtle"
+              onClick={() => setIsExpanded(!isExpanded)}
+              aria-label="Toggle group"
+            >
+              {isExpanded ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+            </ActionIcon>
+            <div>
+              <Text fw={600} size="md" c={isDark ? "white" : "dark"}>{title}</Text>
+              <Text c={isDark ? "gray.3" : "dimmed"} size="sm">
+                {getTimeBlockLabel && getTimeBlockLabel(tasklist.timeBlockId)}
+              </Text>
+            </div>
+          </Group>
+          <Group gap="sm" align="center">
+            <div style={{ textAlign: 'right' }}>
+              <Text size="sm" c={isDark ? "gray.3" : "dimmed"}>Progress</Text>
+              <Text fw={600} size="lg" c={progressPercentage === 100 ? (isDark ? "green.1" : "green.8") : (isDark ? "blue.1" : "blue.8")}>
+                {completedCount}/{totalCount} ({progressPercentage}%)
+              </Text>
+            </div>
+            <div style={{ 
+              width: 60, 
+              height: 60, 
+              borderRadius: '50%', 
+              background: `conic-gradient(${progressPercentage === 100 ? 'var(--mantine-color-green-6)' : 'var(--mantine-color-blue-6)'} ${progressPercentage * 3.6}deg, var(--mantine-color-gray-3) 0deg)`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative'
+            }}>
+              <div style={{
+                width: 40,
+                height: 40,
+                borderRadius: '50%',
+                background: 'var(--mantine-color-body)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <Text size="xs" fw={600} c={progressPercentage === 100 ? (isDark ? "green.1" : "green.8") : (isDark ? "blue.1" : "blue.8")}>
+                  {progressPercentage}%
+                </Text>
+              </div>
+            </div>
+            {/* Sign & Submit button integrated into header */}
+            {groupBy === 'timeblock' && (
+              <Button 
+                onClick={() => signoff(tasklist)} 
+                disabled={!canSubmit}
+                size="sm"
+                variant={canSubmit ? "filled" : "outline"}
+                color={canSubmit ? "green" : "gray"}
+              >
+                Sign & Submit
+              </Button>
+            )}
+          </Group>
+        </Group>
+      </Card.Section>
+      
+      <Collapse in={isExpanded}>
+        <Card.Section inheritPadding py="md">
+          <Stack gap="sm">
+            {tasks.map((task) => {
+              const state = states.find((s) => s.taskId === task.id);
+              const isComplete = state?.status === "Complete";
+              const canComplete = canTaskBeCompleted(task, state);
+              const opened = isTaskOpen(tasklist.id, task.id);
+              
+              return (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  state={state}
+                  isComplete={isComplete}
+                  canComplete={canComplete}
+                  opened={opened}
+                  onToggle={() => onToggleTask(tasklist.id, task.id)}
+                  onUpdate={(patch) => updateTaskState(tasklist.id, task.id, patch)}
+                  onComplete={() => handleComplete(tasklist, task)}
+                  onUpload={(file) => handleUpload(tasklist, task, file)}
+                />
+              );
+            })}
+          </Stack>
+        </Card.Section>
+      </Collapse>
+    </Card>
+  );
+}
+
+function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUpdate, onComplete, onUpload }) {
+  const getPriorityColor = (priority) => {
+    switch (priority) {
+      case 1: return 'red';
+      case 2: return 'orange';
+      case 3: return 'blue';
+      case 4: return 'gray';
+      default: return 'blue';
+    }
+  };
+
+  const getPriorityLabel = (priority) => {
+    switch (priority) {
+      case 1: return 'Critical';
+      case 2: return 'High';
+      case 3: return 'Normal';
+      case 4: return 'Low';
+      default: return 'Normal';
+    }
+  };
+
+  return (
+    <Card
+      withBorder
+      radius="md"
+      style={{
+        borderColor: isComplete ? "var(--mantine-color-green-6)" : "var(--mantine-color-gray-4)",
+        background: isComplete 
+          ? "color-mix(in oklab, var(--mantine-color-green-6) 8%, var(--mantine-color-body))" 
+          : "var(--mantine-color-body)",
+        transition: 'all 0.2s ease',
+      }}
+    >
+      <Group justify="space-between" align="flex-start" wrap="nowrap">
+        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+          <ActionIcon 
+            variant="subtle" 
+            onClick={onToggle} 
+            aria-label="Toggle details"
+            style={{ flexShrink: 0 }}
+          >
+            {opened ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+          </ActionIcon>
+          
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <Group gap={6} wrap="wrap" align="center">
+              <Text fw={600} c={isComplete ? "green.9" : undefined} style={{ wordBreak: 'break-word', lineHeight: 1.3 }}>
+                {task.title}
+              </Text>
+              
+              <Badge
+                size="xs"
+                color={getPriorityColor(task.priority)}
+                variant="light"
+              >
+                {getPriorityLabel(task.priority)}
+              </Badge>
+              
+              {task.category && (
+                <Badge size="xs" variant="outline" color="gray">
+                  {task.category}
+                </Badge>
+              )}
+              
+              {state?.reviewStatus && (
+                <Badge
+                  variant="outline"
+                  color={state.reviewStatus === "Approved" ? "green" : state.reviewStatus === "Rework" ? "yellow" : "gray"}
+                  size="xs"
+                >
+                  {state.reviewStatus}
+                </Badge>
+              )}
+              
+              {isComplete && (
+                <Badge color="green" variant="light" leftSection={<IconCheck size={12} />} size="xs">
+                  Completed
+                </Badge>
+              )}
+            </Group>
+            
+            <Group gap="xs" mt={4} wrap="wrap">
+              <Text c="dimmed" fz="xs">
+                {task.inputType}
+              </Text>
+              {task.photoRequired && (
+                <Badge size="xs" variant="dot" color="blue">Photo</Badge>
+              )}
+              {task.noteRequired && (
+                <Badge size="xs" variant="dot" color="orange">Note</Badge>
+              )}
+              {task.inputType === "number" && task.min !== null && task.max !== null && (
+                <Badge size="xs" variant="dot" color="purple">
+                  {task.min}-{task.max}
+                </Badge>
+              )}
+            </Group>
+          </div>
+        </Group>
+
+        <Group gap="xs" wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }} visibleFrom="sm">
+          {task.inputType === "number" && (
+            <NumberInput
+              placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
+              value={state?.value ?? ""}
+              onChange={(v) => onUpdate({ value: Number(v) })}
+              disabled={isComplete}
+              style={{ width: rem(96) }}
+              size="sm"
+            />
+          )}
+
+          <TextInput
+            placeholder="Add note"
+            value={state?.note ?? ""}
+            onChange={(e) => onUpdate({ note: e.target.value })}
+            disabled={isComplete && !task.noteRequired}
+            style={{ width: rem(180) }}
+            size="sm"
+          />
+
+          <FileButton onChange={(file) => file && onUpload(file)} accept="image/*" disabled={isComplete}>
+            {(props) => (
+              <Button variant="default" leftSection={<IconUpload size={14} />} size="sm" {...props}>
+                Photo
+              </Button>
+            )}
+          </FileButton>
+
+          <Button
+            variant={isComplete ? "outline" : "default"}
+            color={isComplete ? "green" : undefined}
+            onClick={onComplete}
+            disabled={!canComplete || isComplete}
+            size="sm"
+          >
+            {isComplete ? "✓ Done" : "Complete"}
+          </Button>
+
+          <Switch
+            checked={!!state?.na}
+            onChange={(e) => onUpdate({ na: e.currentTarget.checked })}
+            disabled={isComplete}
+            label="N/A"
+            size="sm"
+          />
+        </Group>
+      </Group>
+
+      <Collapse in={opened}>
+        <Divider my="sm" />
+        <Stack gap="xs">
+          <TextInput
+            placeholder="Add note"
+            value={state?.note ?? ""}
+            onChange={(e) => onUpdate({ note: e.target.value })}
+            disabled={isComplete && !task.noteRequired}
+            style={{ width: "100%" }}
+            hiddenFrom="sm"
+            size="sm"
+          />
+          
+          <Stack gap="xs" hiddenFrom="sm">
+            {task.inputType === "number" && (
+              <NumberInput
+                placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
+                value={state?.value ?? ""}
+                onChange={(v) => onUpdate({ value: Number(v) })}
+                disabled={isComplete}
+                size="sm"
+              />
+            )}
+            <FileButton onChange={(file) => file && onUpload(file)} accept="image/*" disabled={isComplete}>
+              {(props) => (
+                <Button variant="default" leftSection={<IconUpload size={14} />} fullWidth size="sm" {...props}>
+                  Upload Photo
+                </Button>
+              )}
+            </FileButton>
+            <Button
+              variant={isComplete ? "outline" : "default"}
+              color={isComplete ? "green" : undefined}
+              onClick={onComplete}
+              disabled={!canComplete || isComplete}
+              fullWidth
+              size="sm"
+            >
+              {isComplete ? "Completed ✓" : "Complete Task"}
+            </Button>
+            <Switch
+              checked={!!state?.na}
+              onChange={(e) => onUpdate({ na: e.currentTarget.checked })}
+              disabled={isComplete}
+              label="N/A"
+              size="sm"
+            />
+          </Stack>
+          <EvidenceRow state={state} />
+        </Stack>
+      </Collapse>
+    </Card>
+  );
+}
+
 /** ---------------------- Employee View ---------------------- */
 function EmployeeView({
   tasklists,
@@ -268,6 +598,8 @@ function EmployeeView({
 }) {
   const [openLists, setOpenLists] = React.useState({});
   const [openTasks, setOpenTasks] = React.useState({});
+  const [groupBy, setGroupBy] = React.useState('timeblock'); // 'timeblock', 'category', 'priority', 'status'
+  const [sortBy, setSortBy] = React.useState('priority'); // 'priority', 'alphabetical', 'completion'
 
   // Restock state
   const [restock, setRestock] = React.useState({ category: 'Food', item: '', quantity: 1, urgency: 'normal', notes: '', requestedBy: currentEmployee || '' });
@@ -336,9 +668,169 @@ function EmployeeView({
       return { ...prev, [k]: !prev[k] };
     });
 
+  // Group and sort tasks based on selected options
+  const groupedTasklists = React.useMemo(() => {
+    if (tasklists.length === 0) return [];
+
+    const allTasks = tasklists.flatMap(tl => 
+      tl.tasks.map(task => ({
+        ...task,
+        tasklistId: tl.id,
+        tasklist: tl,
+        states: working?.[tl.id] ?? []
+      }))
+    );
+
+    // Sort tasks
+    const sortedTasks = [...allTasks].sort((a, b) => {
+      switch (sortBy) {
+        case 'priority':
+          return (a.priority || 3) - (b.priority || 3);
+        case 'alphabetical':
+          return a.title.localeCompare(b.title);
+        case 'completion':
+          const aState = a.states.find(s => s.taskId === a.id);
+          const bState = b.states.find(s => s.taskId === b.id);
+          const aComplete = aState?.status === "Complete" || aState?.na;
+          const bComplete = bState?.status === "Complete" || bState?.na;
+          return aComplete === bComplete ? 0 : aComplete ? 1 : -1;
+        default:
+          return 0;
+      }
+    });
+
+    // Group tasks
+    const groups = new Map();
+    
+    sortedTasks.forEach(task => {
+      let groupKey;
+      let groupTitle;
+      
+      switch (groupBy) {
+        case 'timeblock':
+          groupKey = task.tasklist.timeBlockId || 'no-timeblock';
+          groupTitle = getTimeBlockLabelFromLists(checklists.timeBlocks, task.tasklist.timeBlockId) || 'No Time Block';
+          break;
+        case 'category':
+          groupKey = task.category || 'uncategorized';
+          groupTitle = task.category || 'Uncategorized';
+          break;
+        case 'priority':
+          groupKey = task.priority || 3;
+          const priorityLabels = { 1: 'Critical', 2: 'High', 3: 'Normal', 4: 'Low' };
+          groupTitle = `${priorityLabels[task.priority || 3]} Priority`;
+          break;
+        case 'status':
+          const state = task.states.find(s => s.taskId === task.id);
+          const isComplete = state?.status === "Complete" || state?.na;
+          groupKey = isComplete ? 'completed' : 'pending';
+          groupTitle = isComplete ? 'Completed Tasks' : 'Pending Tasks';
+          break;
+        default:
+          groupKey = 'default';
+          groupTitle = 'All Tasks';
+      }
+      
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          key: groupKey,
+          title: groupTitle,
+          tasks: [],
+          tasklist: task.tasklist
+        });
+      }
+      groups.get(groupKey).tasks.push(task);
+    });
+
+    return Array.from(groups.values());
+  }, [tasklists, working, groupBy, sortBy, checklists.timeBlocks]);
+
+  // Calculate overall progress
+  const overallProgress = React.useMemo(() => {
+    if (tasklists.length === 0) return { completed: 0, total: 0, percentage: 0 };
+    
+    const allTasks = tasklists.flatMap(tl => tl.tasks);
+    const allStates = tasklists.flatMap(tl => working?.[tl.id] ?? []);
+    
+    const completed = allTasks.filter(task => {
+      const state = allStates.find(s => s.taskId === task.id);
+      return state?.status === "Complete" || state?.na;
+    }).length;
+    
+    const total = allTasks.length;
+    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+    
+    return { completed, total, percentage };
+  }, [tasklists, working]);
+
+  // Theme detection
+  const { colorScheme } = useMantineColorScheme();
+  const computed = useComputedColorScheme('light');
+  const isDark = computed === 'dark';
+
   return (
     <Stack gap="md">
-      <Text fw={700} fz="lg">Today</Text>
+      {/* Progress Summary Dashboard */}
+      {tab === 'tasks' && tasklists.length > 0 && (
+        <Card withBorder radius="lg" shadow="sm" style={{ 
+          background: overallProgress.percentage === 100 
+            ? (isDark 
+                ? 'linear-gradient(135deg, var(--mantine-color-green-9) 0%, var(--mantine-color-green-8) 100%)'
+                : 'linear-gradient(135deg, var(--mantine-color-green-0) 0%, var(--mantine-color-green-1) 100%)')
+            : (isDark 
+                ? 'linear-gradient(135deg, var(--mantine-color-blue-9) 0%, var(--mantine-color-blue-8) 100%)'
+                : 'linear-gradient(135deg, var(--mantine-color-blue-0) 0%, var(--mantine-color-blue-1) 100%)'),
+          borderColor: overallProgress.percentage === 100 
+            ? 'var(--mantine-color-green-6)' 
+            : 'var(--mantine-color-blue-6)'
+        }}>
+          <Group justify="space-between" align="center" p="md">
+            <div>
+              <Text fw={700} fz="xl" c={overallProgress.percentage === 100 ? (isDark ? "green.1" : "green.8") : (isDark ? "blue.1" : "blue.8")}>
+                Today's Progress
+              </Text>
+              <Text c={isDark ? "gray.3" : "dimmed"} size="sm" mt={4}>
+                {overallProgress.completed} of {overallProgress.total} tasks completed
+              </Text>
+            </div>
+            
+            <Group gap="lg" align="center">
+              <div style={{ textAlign: 'center' }}>
+                <Text fw={600} size="lg" c={overallProgress.percentage === 100 ? (isDark ? "green.1" : "green.8") : (isDark ? "blue.1" : "blue.8")}>
+                  {overallProgress.percentage}%
+                </Text>
+                <Text size="xs" c={isDark ? "gray.3" : "dimmed"}>Complete</Text>
+              </div>
+              
+              <div style={{ 
+                width: 80, 
+                height: 80, 
+                borderRadius: '50%', 
+                background: `conic-gradient(${overallProgress.percentage === 100 ? 'var(--mantine-color-green-6)' : 'var(--mantine-color-blue-6)'} ${overallProgress.percentage * 3.6}deg, var(--mantine-color-gray-3) 0deg)`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative'
+              }}>
+                <div style={{
+                  width: 60,
+                  height: 60,
+                  borderRadius: '50%',
+                  background: 'var(--mantine-color-body)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Text size="sm" fw={700} c={overallProgress.percentage === 100 ? (isDark ? "green.1" : "green.8") : (isDark ? "blue.1" : "blue.8")}>
+                    {overallProgress.percentage}
+                  </Text>
+                </div>
+              </div>
+            </Group>
+          </Group>
+        </Card>
+      )}
+
 
       {tab === 'tasks' && (tasklists.length === 0 ? (
         // Skeleton loading for tasklists
@@ -361,196 +853,86 @@ function EmployeeView({
             </Card>
           ))}
         </Stack>
-      ) : tasklists.map((tl) => {
-        const states =
-          working?.[tl.id] ??
-          tl.tasks.map((t) => ({
-            taskId: t.id,
-            status: "Incomplete",
-            value: null,
-            note: "",
-            photos: [],
-            na: false,
-            reviewStatus: "Pending",
-          }));
-        const total = tl.tasks.length;
-        const done = states.filter((t) => t.status === "Complete" || t.na).length;
-        const canSubmit = tl.tasks.every((t) => {
-          const st = states.find((s) => s.taskId === t.id);
-          return (st.status === "Complete" || st.na) && canTaskBeCompleted(t, st);
-        });
+      ) : (
+        <Stack gap="md">
+          {groupedTasklists.map((group) => {
+            const states = group.tasks.map(task => {
+              const state = task.states.find(s => s.taskId === task.id);
+              return state || {
+                taskId: task.id,
+                status: "Incomplete",
+                value: null,
+                note: "",
+                photos: [],
+                na: false,
+                reviewStatus: "Pending",
+              };
+            });
+            
+            const canSubmit = group.tasks.every((task) => {
+              const state = states.find((s) => s.taskId === task.id);
+              return (state.status === "Complete" || state.na) && canTaskBeCompleted(task, state);
+            });
 
-        const isOpen = openLists[tl.id] ?? true;
-        return (
-          <Card key={tl.id} withBorder radius="lg" shadow="sm">
-            <Group justify="space-between" align="center">
-              <div>
-                <Group gap={6} align="center">
-                  <ActionIcon
-                    variant="subtle"
-                    onClick={() => setOpenLists(prev => ({ ...prev, [tl.id]: !(prev[tl.id] ?? true) }))}
-                    aria-label="Toggle checklist"
-                  >
-                    {(isOpen ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />)}
-                  </ActionIcon>
-                  <Text fw={600}>{tl.name}</Text>
+            return (
+              <TaskGroup
+                key={group.key}
+                title={group.title}
+                tasks={group.tasks}
+                tasklist={group.tasklist}
+                states={states}
+                onToggleTask={toggleTaskOpen}
+                isTaskOpen={isTaskOpen}
+                updateTaskState={updateTaskState}
+                handleComplete={handleComplete}
+                handleUpload={handleUpload}
+                getTimeBlockLabel={(timeBlockId) => getTimeBlockLabelFromLists(checklists.timeBlocks, timeBlockId)}
+                signoff={signoff}
+                groupBy={groupBy}
+              />
+            );
+          })}
+          
+          {/* Overall Sign & Submit for non-timeblock groupings */}
+          {groupBy !== 'timeblock' && tasklists.length > 0 && (
+            <Card withBorder radius="lg" shadow="sm" style={{ 
+              background: isDark ? 'var(--mantine-color-blue-9)' : 'var(--mantine-color-blue-0)',
+              borderColor: 'var(--mantine-color-blue-6)'
+            }}>
+              <Group justify="space-between" align="center" p="md">
+                <div>
+                  <Text fw={600} size="md" c={isDark ? "blue.1" : "blue.8"}>Complete All Tasks</Text>
+                  <Text c={isDark ? "gray.3" : "dimmed"} size="sm">
+                    Sign and submit all completed tasklists for review
+                  </Text>
+                </div>
+                <Group gap="sm">
+                  {tasklists.map((tl) => {
+                    const states = working?.[tl.id] ?? [];
+                    const canSubmit = tl.tasks.every((t) => {
+                      const st = states.find((s) => s.taskId === t.id);
+                      return (st.status === "Complete" || st.na) && canTaskBeCompleted(t, st);
+                    });
+                    
+                    return (
+                      <Button
+                        key={tl.id}
+                        onClick={() => signoff(tl)}
+                        disabled={!canSubmit}
+                        size="sm"
+                        variant={canSubmit ? "filled" : "outline"}
+                        color={canSubmit ? "green" : "gray"}
+                      >
+                        {tl.name}
+                      </Button>
+                    );
+                  })}
                 </Group>
-                <Text c="dimmed" fz="sm">
-                  {getTimeBlockLabelFromLists(checklists.timeBlocks, tl.timeBlockId)}
-                </Text>
-                <Badge mt={6} variant="light">
-                  Progress: {done}/{total} ({pct(done, total)}%)
-                </Badge>
-              </div>
-              <Button onClick={() => signoff(tl)} disabled={!canSubmit}>Sign & Submit</Button>
-            </Group>
-
-            <Collapse in={isOpen}>
-              <Stack gap="xs" mt="md">
-                {tl.tasks.map((task) => {
-                  const state = states.find((s) => s.taskId === task.id);
-                  const isComplete = state.status === "Complete";
-                  const canComplete = canTaskBeCompleted(task, state);
-                  const opened = isTaskOpen(tl.id, task.id);
-                  return (
-                    <Card
-                      key={task.id}
-                      withBorder
-                      radius="md"
-                      style={{
-                        borderColor: isComplete ? "var(--mantine-color-green-6)" : undefined,
-                        background: isComplete ? "color-mix(in oklab, var(--mantine-color-green-6) 8%, var(--mantine-color-body))" : undefined,
-                      }}
-                    >
-                      <Group justify="space-between" align="flex-start" wrap="nowrap">
-                        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                          <ActionIcon variant="subtle" onClick={() => toggleTaskOpen(tl.id, task.id)} aria-label="Toggle details">
-                            {opened ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
-                          </ActionIcon>
-                          <div style={{ minWidth: 0 }}>
-                            <Group gap={6} wrap="wrap">
-                              <Text fw={600} truncate c={isComplete ? "green.9" : undefined}>{task.title}</Text>
-                              {state.reviewStatus && (
-                                <Badge
-                                  variant="outline"
-                                  color={state.reviewStatus === "Approved" ? "green" : state.reviewStatus === "Rework" ? "yellow" : "gray"}
-                                >
-                                  {state.reviewStatus}
-                                </Badge>
-                              )}
-                              {isComplete && (
-                                <Badge color="green" variant="light" leftSection={<IconCheck size={14} />}>Completed</Badge>
-                              )}
-                            </Group>
-                            <Text c="dimmed" fz="sm" mt={2}>
-                              {task.category} • {task.inputType}
-                              {task.photoRequired ? " • Photo required" : ""}
-                              {task.noteRequired ? " • Note required" : ""}
-                            </Text>
-                          </div>
-                        </Group>
-
-                        <Group gap="xs" wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }} visibleFrom="sm">
-                          {task.inputType === "number" && (
-                            <NumberInput
-                              placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
-                              value={state.value ?? ""}
-                              onChange={(v) => updateTaskState(tl.id, task.id, { value: Number(v) })}
-                              disabled={isComplete}
-                              style={{ width: rem(96) }}
-                            />
-                          )}
-
-                          <TextInput
-                            placeholder="Add note"
-                            value={state.note}
-                            onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
-                            disabled={isComplete && !task.noteRequired}
-                            style={{ width: rem(180) }}
-
-                          />
-
-                          <FileButton onChange={(file) => file && handleUpload(tl, task, file)} accept="image/*" disabled={isComplete}>
-                            {(props) => (
-                              <Button variant="default" leftSection={<IconUpload size={16} />} {...props}>
-                                Photo
-                              </Button>
-                            )}
-                          </FileButton>
-
-                          <Button
-                            variant={isComplete ? "outline" : "default"}
-                            color={isComplete ? "green" : undefined}
-                            onClick={() => handleComplete(tl, task)}
-                            disabled={!canComplete || isComplete}
-                          >
-                            {isComplete ? "Completed ✓" : "Complete"}
-                          </Button>
-
-                          <Switch
-                            checked={!!state.na}
-                            onChange={(e) => updateTaskState(tl.id, task.id, { na: e.currentTarget.checked })}
-                            disabled={isComplete}
-                            label="N/A"
-                          />
-                        </Group>
-                      </Group>
-
-                      <Collapse in={opened}>
-                        <Divider my={"sm"} />
-                        <Stack gap="xs">
-                          <TextInput
-                            placeholder="Add note"
-                            value={state.note}
-                            onChange={(e) => updateTaskState(tl.id, task.id, { note: e.target.value })}
-                            disabled={isComplete && !task.noteRequired}
-                            style={{ width: "100%" }}
-                            hiddenFrom="sm"
-                          />
-                          {/* Mobile actions */}
-                          <Stack gap="xs" hiddenFrom="sm">
-                            {task.inputType === "number" && (
-                              <NumberInput
-                                placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
-                                value={state.value ?? ""}
-                                onChange={(v) => updateTaskState(tl.id, task.id, { value: Number(v) })}
-                                disabled={isComplete}
-                              />
-                            )}
-                            <FileButton onChange={(file) => file && handleUpload(tl, task, file)} accept="image/*" disabled={isComplete}>
-                              {(props) => (
-                                <Button variant="default" leftSection={<IconUpload size={16} />} fullWidth {...props}>
-                                  Upload Photo
-                                </Button>
-                              )}
-                            </FileButton>
-                            <Button
-                              variant={isComplete ? "outline" : "default"}
-                              color={isComplete ? "green" : undefined}
-                              onClick={() => handleComplete(tl, task)}
-                              disabled={!canComplete || isComplete}
-                              fullWidth
-                            >
-                              {isComplete ? "Completed ✓" : "Complete Task"}
-                            </Button>
-                            <Switch
-                              checked={!!state.na}
-                              onChange={(e) => updateTaskState(tl.id, task.id, { na: e.currentTarget.checked })}
-                              disabled={isComplete}
-                              label="N/A"
-                            />
-                          </Stack>
-                          <EvidenceRow state={state} />
-                        </Stack>
-                      </Collapse>
-                    </Card>
-                  );
-                })}
-              </Stack>
-            </Collapse>
-          </Card>
-        );
-      }))}
+              </Group>
+            </Card>
+          )}
+        </Stack>
+      ))}
 
       {tab === 'restock' && (
         <Card withBorder radius="lg" shadow="sm">
@@ -951,7 +1333,8 @@ function ManagerView({
   company,
   locations,
   employees,
-  getTaskMeta
+  getTaskMeta,
+  checklists
 }) {
   async function fetchManagerSubmissions({ supabase, companyId, from, to, locationId }) {
     let q = supabase
@@ -974,6 +1357,12 @@ function ManagerView({
   }
 
   const [reworkNote, setReworkNote] = useState("");
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  
+  // Theme detection
+  const { colorScheme } = useMantineColorScheme();
+  const computed = useComputedColorScheme('light');
+  const isDark = computed === 'dark';
 
   const userById = useMemo(() => {
     const m = new Map();
@@ -995,6 +1384,10 @@ function ManagerView({
     employee: "",
     category: "",
     status: "", // Pending | Approved | Rework
+    priority: "", // High | Normal | Low
+    hasPhotos: "", // true | false | ""
+    hasNotes: "", // true | false | ""
+    reworkCount: "", // 0 | 1+ | ""
   });
 
   const locationOptions = [{ value: "", label: "All locations" }].concat(
@@ -1031,6 +1424,42 @@ function ManagerView({
       );
       if (!any) return false;
     }
+    if (filters.priority) {
+      const any = s.tasks.some(
+        (t) => {
+          const meta = getTaskMeta(s.tasklistId, t.taskId);
+          const priority = meta?.priority || 3;
+          const priorityLabel = priority === 1 ? "Critical" : priority === 2 ? "High" : priority === 3 ? "Normal" : "Low";
+          return priorityLabel === filters.priority;
+        }
+      );
+      if (!any) return false;
+    }
+    if (filters.hasPhotos !== "") {
+      const hasPhotos = filters.hasPhotos === "true";
+      const any = s.tasks.some(t => {
+        const hasTaskPhotos = Array.isArray(t.photos) && t.photos.length > 0;
+        return hasTaskPhotos === hasPhotos;
+      });
+      if (!any) return false;
+    }
+    if (filters.hasNotes !== "") {
+      const hasNotes = filters.hasNotes === "true";
+      const any = s.tasks.some(t => {
+        const hasTaskNotes = t.note && t.note.trim() !== "";
+        return hasTaskNotes === hasNotes;
+      });
+      if (!any) return false;
+    }
+    if (filters.reworkCount !== "") {
+      const any = s.tasks.some(t => {
+        const reworkCount = t.reworkCount || 0;
+        if (filters.reworkCount === "0") return reworkCount === 0;
+        if (filters.reworkCount === "1+") return reworkCount >= 1;
+        return false;
+      });
+      if (!any) return false;
+    }
     return true;
   }
 
@@ -1060,9 +1489,10 @@ function ManagerView({
 
   const byEmployeeMap = new Map();
   for (const s of filtered) {
-    const emp = s.submittedBy || s.signedBy || "Unknown";
-    if (!byEmployeeMap.has(emp)) byEmployeeMap.set(emp, { employee: emp, completed: 0 });
-    const row = byEmployeeMap.get(emp);
+    const empId = s.submittedBy || s.signedBy || "Unknown";
+    const empName = nameForUserId(empId);
+    if (!byEmployeeMap.has(empId)) byEmployeeMap.set(empId, { employee: empName, completed: 0 });
+    const row = byEmployeeMap.get(empId);
     for (const t of s.tasks) {
       if (t.na || t.reviewStatus === "Approved") row.completed += 1;
       if (t.wasReworked) row.reworked += 1; // optional, if you want to visualize it later
@@ -1231,73 +1661,236 @@ function ManagerView({
     <Stack gap="md">
       <Tabs defaultValue="approve" keepMounted={false}>
         <Tabs.List>
-          <Tabs.Tab value="approve">Approve</Tabs.Tab>
-          <Tabs.Tab value="dashboard">Dashboard</Tabs.Tab>
+          <Tabs.Tab 
+            value="approve" 
+            leftSection={<IconShieldHalf size={14} />}
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-1px)')}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+          >
+            Approve
+          </Tabs.Tab>
+          <Tabs.Tab 
+            value="dashboard" 
+            leftSection={<IconLayoutGrid size={14} />}
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-1px)')}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+          >
+            Dashboard
+          </Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="approve" pt="md">
-          <Card withBorder radius="md" mb="sm">
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 3 }}>
-                <TextInput
-                  label="From"
-                  type="date"
-                  value={filters.from}
-                  onChange={(e) => setFilters({ ...filters, from: e.target.value })}
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
-                <TextInput
-                  label="To"
-                  type="date"
-                  value={filters.to}
-                  onChange={(e) => setFilters({ ...filters, to: e.target.value })}
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
-                <Select
-                  label="Location"
-                  data={locationOptions}
-                  value={filters.locationId}
-                  onChange={(v) => setFilters({ ...filters, locationId: v || "" })}
-                  comboboxProps={{ withinPortal: true }}
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
-                <Select
-                  label="Employee"
-                  data={employeeOptions}
-                  value={filters.employee}
-                  onChange={(v) => setFilters({ ...filters, employee: v || "" })}
-                  searchable
-                  comboboxProps={{ withinPortal: true }}
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
-                <Select
-                  label="Category"
-                  data={categoryOptions}
-                  value={filters.category}
-                  onChange={(v) => setFilters({ ...filters, category: v || "" })}
-                  searchable
-                  comboboxProps={{ withinPortal: true }}
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
-                <Select
-                  label="Status"
-                  data={[
-                    { value: "", label: "All" },
-                    { value: "Pending", label: "Pending" },
-                    { value: "Approved", label: "Approved" },
-                    { value: "Rework", label: "Rework" },
-                  ]}
-                  value={filters.status}
-                  onChange={(v) => setFilters({ ...filters, status: v || "" })}
-                  comboboxProps={{ withinPortal: true }}
-                />
-              </Grid.Col>
-            </Grid>
+          {/* Collapsible Filter Bar */}
+          <Card withBorder radius="md" mb="sm" style={{ 
+            background: isDark ? 'var(--mantine-color-dark-6)' : 'var(--mantine-color-gray-0)',
+            borderColor: isDark ? 'var(--mantine-color-dark-4)' : 'var(--mantine-color-gray-3)'
+          }}>
+            <Card.Section withBorder inheritPadding py="sm">
+              <Group justify="space-between" align="center">
+                <Group gap="sm" align="center">
+                  <ActionIcon
+                    variant="subtle"
+                    onClick={() => setFiltersExpanded(!filtersExpanded)}
+                    aria-label="Toggle filters"
+                  >
+                    {filtersExpanded ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+                  </ActionIcon>
+                  <div>
+                    <Text fw={600} size="md" c={isDark ? "white" : "dark"}>Filters</Text>
+                    <Text c={isDark ? "gray.3" : "dimmed"} size="sm">
+                      {filtered.length} of {submissions.length} submissions
+                    </Text>
+                  </div>
+                </Group>
+                
+                <Group gap="sm">
+                  <Button
+                    variant="light"
+                    size="xs"
+                    onClick={() => setFilters({
+                      from: "",
+                      to: "",
+                      locationId: "",
+                      employee: "",
+                      category: "",
+                      status: "",
+                      priority: "",
+                      hasPhotos: "",
+                      hasNotes: "",
+                      reworkCount: ""
+                    })}
+                  >
+                    Clear All
+                  </Button>
+                  <Button
+                    variant="light"
+                    size="xs"
+                    onClick={() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                      setFilters({ ...filters, from: weekAgo, to: today });
+                    }}
+                  >
+                    Last 7 Days
+                  </Button>
+                  <Button
+                    variant="light"
+                    size="xs"
+                    onClick={() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                      setFilters({ ...filters, from: monthAgo, to: today });
+                    }}
+                  >
+                    Last 30 Days
+                  </Button>
+                </Group>
+              </Group>
+            </Card.Section>
+            
+            <Collapse in={filtersExpanded}>
+              <Card.Section inheritPadding py="md">
+                <Grid>
+                  <Grid.Col span={{ base: 12, md: 6, lg: 3 }}>
+                    <TextInput
+                      label="From Date"
+                      type="date"
+                      value={filters.from}
+                      onChange={(e) => setFilters({ ...filters, from: e.target.value })}
+                      size="sm"
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 6, lg: 3 }}>
+                    <TextInput
+                      label="To Date"
+                      type="date"
+                      value={filters.to}
+                      onChange={(e) => setFilters({ ...filters, to: e.target.value })}
+                      size="sm"
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 6, lg: 3 }}>
+                    <Select
+                      label="Location"
+                      data={locationOptions}
+                      value={filters.locationId}
+                      onChange={(v) => setFilters({ ...filters, locationId: v || "" })}
+                      comboboxProps={{ withinPortal: true }}
+                      size="sm"
+                      clearable
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 6, lg: 3 }}>
+                    <Select
+                      label="Employee"
+                      data={employeeOptions}
+                      value={filters.employee}
+                      onChange={(v) => setFilters({ ...filters, employee: v || "" })}
+                      searchable
+                      comboboxProps={{ withinPortal: true }}
+                      size="sm"
+                      clearable
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 6, lg: 3 }}>
+                    <Select
+                      label="Category"
+                      data={categoryOptions}
+                      value={filters.category}
+                      onChange={(v) => setFilters({ ...filters, category: v || "" })}
+                      searchable
+                      comboboxProps={{ withinPortal: true }}
+                      size="sm"
+                      clearable
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 6, lg: 3 }}>
+                    <Select
+                      label="Status"
+                      data={[
+                        { value: "", label: "All Statuses" },
+                        { value: "Pending", label: "Pending" },
+                        { value: "Approved", label: "Approved" },
+                        { value: "Rework", label: "Rework" },
+                      ]}
+                      value={filters.status}
+                      onChange={(v) => setFilters({ ...filters, status: v || "" })}
+                      comboboxProps={{ withinPortal: true }}
+                      size="sm"
+                      clearable
+                    />
+                  </Grid.Col>
+                  
+                  <Grid.Col span={{ base: 12, md: 6, lg: 3 }}>
+                    <Select
+                      label="Priority"
+                      data={[
+                        { value: "", label: "All Priorities" },
+                        { value: "Critical", label: "Critical" },
+                        { value: "High", label: "High" },
+                        { value: "Normal", label: "Normal" },
+                        { value: "Low", label: "Low" },
+                      ]}
+                      value={filters.priority}
+                      onChange={(v) => setFilters({ ...filters, priority: v || "" })}
+                      comboboxProps={{ withinPortal: true }}
+                      size="sm"
+                      clearable
+                    />
+                  </Grid.Col>
+                  
+                  <Grid.Col span={{ base: 12, md: 6, lg: 3 }}>
+                    <Select
+                      label="Has Photos"
+                      data={[
+                        { value: "", label: "All Tasks" },
+                        { value: "true", label: "With Photos" },
+                        { value: "false", label: "Without Photos" },
+                      ]}
+                      value={filters.hasPhotos}
+                      onChange={(v) => setFilters({ ...filters, hasPhotos: v || "" })}
+                      comboboxProps={{ withinPortal: true }}
+                      size="sm"
+                      clearable
+                    />
+                  </Grid.Col>
+                  
+                  <Grid.Col span={{ base: 12, md: 6, lg: 3 }}>
+                    <Select
+                      label="Has Notes"
+                      data={[
+                        { value: "", label: "All Tasks" },
+                        { value: "true", label: "With Notes" },
+                        { value: "false", label: "Without Notes" },
+                      ]}
+                      value={filters.hasNotes}
+                      onChange={(v) => setFilters({ ...filters, hasNotes: v || "" })}
+                      comboboxProps={{ withinPortal: true }}
+                      size="sm"
+                      clearable
+                    />
+                  </Grid.Col>
+                  
+                  <Grid.Col span={{ base: 12, md: 6, lg: 3 }}>
+                    <Select
+                      label="Rework Count"
+                      data={[
+                        { value: "", label: "All Tasks" },
+                        { value: "0", label: "Never Reworked" },
+                        { value: "1+", label: "Reworked 1+ Times" },
+                      ]}
+                      value={filters.reworkCount}
+                      onChange={(v) => setFilters({ ...filters, reworkCount: v || "" })}
+                      comboboxProps={{ withinPortal: true }}
+                      size="sm"
+                      clearable
+                    />
+                  </Grid.Col>
+                </Grid>
+              </Card.Section>
+            </Collapse>
           </Card>
 
           {filtered.length === 0 ? (
@@ -1424,40 +2017,387 @@ function ManagerView({
         </Tabs.Panel>
 
         <Tabs.Panel value="dashboard" pt="md">
-          <Grid>
-            <Grid.Col span={{ base: 12, md: 3 }}>
-              <Card withBorder radius="md">
-                <Text c="dimmed" fz="sm">Total tasks completed</Text>
-                <Text fw={700} fz="xl">{totals.totalTasksCompleted}</Text>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, md: 3 }}>
-              <Card withBorder radius="md">
-                <Text c="dimmed" fz="sm">Total in rework queue</Text>
-                <Text fw={700} fz="xl">{totals.totalRework}</Text>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, md: 3 }}>
-              <Card withBorder radius="md">
-                <Text c="dimmed" fz="sm">Tasks ever reworked</Text>
-                <Text fw={700} fz="xl">{totals.totalReworkedHistorical}</Text>
-              </Card>
-            </Grid.Col>
+          {/* Dashboard Filter Bar */}
+          <Card withBorder radius="md" mb="lg" style={{ 
+            background: isDark ? 'var(--mantine-color-dark-6)' : 'var(--mantine-color-gray-0)',
+            borderColor: isDark ? 'var(--mantine-color-dark-4)' : 'var(--mantine-color-gray-3)'
+          }}>
+            <Card.Section withBorder inheritPadding py="sm">
+              <Group justify="space-between" align="center">
+                <Group gap="sm" align="center">
+                  <div>
+                    <Text fw={600} size="md" c={isDark ? "white" : "dark"}>Dashboard Filters</Text>
+                    <Text c={isDark ? "gray.3" : "dimmed"} size="sm">
+                      Filter data by time period
+                    </Text>
+                  </div>
+                </Group>
+                
+                <Group gap="sm">
+                  <Button
+                    variant="light"
+                    size="xs"
+                    onClick={() => {
+                      setFilters({ ...filters, from: "", to: "" });
+                    }}
+                  >
+                    All Time
+                  </Button>
+                  <Button
+                    variant="light"
+                    size="xs"
+                    onClick={() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                      setFilters({ ...filters, from: weekAgo, to: today });
+                    }}
+                  >
+                    Last 7 Days
+                  </Button>
+                  <Button
+                    variant="light"
+                    size="xs"
+                    onClick={() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                      setFilters({ ...filters, from: monthAgo, to: today });
+                    }}
+                  >
+                    Last 30 Days
+                  </Button>
+                  <Button
+                    variant="light"
+                    size="xs"
+                    onClick={() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const quarterAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                      setFilters({ ...filters, from: quarterAgo, to: today });
+                    }}
+                  >
+                    Last 3 Months
+                  </Button>
+                  <Button
+                    variant="light"
+                    size="xs"
+                    onClick={() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const yearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                      setFilters({ ...filters, from: yearAgo, to: today });
+                    }}
+                  >
+                    Last Year
+                  </Button>
+                </Group>
+              </Group>
+            </Card.Section>
+          </Card>
 
+          {/* Dashboard Overview Cards */}
+          <Grid mb="lg">
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card withBorder radius="md" style={{ 
+                background: isDark ? 'var(--mantine-color-blue-9)' : 'var(--mantine-color-blue-0)',
+                borderColor: 'var(--mantine-color-blue-6)'
+              }}>
+                <Group justify="space-between" align="center">
+                  <div>
+                    <Text c={isDark ? "blue.1" : "blue.8"} fw={600} size="sm">Total Tasks</Text>
+                    <Text fw={700} fz="xl" c={isDark ? "white" : "dark"}>{totals.totalTasksCompleted}</Text>
+                    <Text c={isDark ? "blue.2" : "blue.6"} size="xs">Completed</Text>
+                  </div>
+                  <div style={{ 
+                    width: 50, 
+                    height: 50, 
+                    borderRadius: '50%', 
+                    background: 'var(--mantine-color-blue-6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <IconCheck size={24} color="white" />
+                  </div>
+                </Group>
+              </Card>
+            </Grid.Col>
+            
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card withBorder radius="md" style={{ 
+                background: isDark ? 'var(--mantine-color-yellow-9)' : 'var(--mantine-color-yellow-0)',
+                borderColor: 'var(--mantine-color-yellow-6)'
+              }}>
+                <Group justify="space-between" align="center">
+                  <div>
+                    <Text c={isDark ? "yellow.1" : "yellow.8"} fw={600} size="sm">Rework Queue</Text>
+                    <Text fw={700} fz="xl" c={isDark ? "white" : "dark"}>{totals.totalRework}</Text>
+                    <Text c={isDark ? "yellow.2" : "yellow.6"} size="xs">Pending Review</Text>
+                  </div>
+                  <div style={{ 
+                    width: 50, 
+                    height: 50, 
+                    borderRadius: '50%', 
+                    background: 'var(--mantine-color-yellow-6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <IconBug size={24} color="white" />
+                  </div>
+                </Group>
+              </Card>
+            </Grid.Col>
+            
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card withBorder radius="md" style={{ 
+                background: isDark ? 'var(--mantine-color-orange-9)' : 'var(--mantine-color-orange-0)',
+                borderColor: 'var(--mantine-color-orange-6)'
+              }}>
+                <Group justify="space-between" align="center">
+                  <div>
+                    <Text c={isDark ? "orange.1" : "orange.8"} fw={600} size="sm">Reworked Tasks</Text>
+                    <Text fw={700} fz="xl" c={isDark ? "white" : "dark"}>{totals.totalReworkedHistorical}</Text>
+                    <Text c={isDark ? "orange.2" : "orange.6"} size="xs">Historical</Text>
+                  </div>
+                  <div style={{ 
+                    width: 50, 
+                    height: 50, 
+                    borderRadius: '50%', 
+                    background: 'var(--mantine-color-orange-6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <IconFilter size={24} color="white" />
+                  </div>
+                </Group>
+              </Card>
+            </Grid.Col>
+            
+            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Card withBorder radius="md" style={{ 
+                background: isDark ? 'var(--mantine-color-green-9)' : 'var(--mantine-color-green-0)',
+                borderColor: 'var(--mantine-color-green-6)'
+              }}>
+                <Group justify="space-between" align="center">
+                  <div>
+                    <Text c={isDark ? "green.1" : "green.8"} fw={600} size="sm">Completion Rate</Text>
+                    <Text fw={700} fz="xl" c={isDark ? "white" : "dark"}>
+                      {submissions.length > 0 ? Math.round((totals.totalTasksCompleted / (submissions.length * 10)) * 100) : 0}%
+                    </Text>
+                    <Text c={isDark ? "green.2" : "green.6"} size="xs">Overall</Text>
+                  </div>
+                  <div style={{ 
+                    width: 50, 
+                    height: 50, 
+                    borderRadius: '50%', 
+                    background: 'var(--mantine-color-green-6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <IconListCheck size={24} color="white" />
+                  </div>
+                </Group>
+              </Card>
+            </Grid.Col>
           </Grid>
 
-          <Card withBorder radius="md" mt="md" p="md" style={{ height: 360 }}>
-            <Text fw={600} mb="xs">Tasks completed by employee</Text>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={byEmployee} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="employee" />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Bar dataKey="completed" />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
+          {/* Charts Section */}
+          <Grid>
+            <Grid.Col span={{ base: 12, md: 6 }}>
+              <Card withBorder radius="md" p="md" style={{ height: 400 }}>
+                <Text fw={600} mb="md" c={isDark ? "white" : "dark"}>Tasks Completed by Employee</Text>
+                <ResponsiveContainer width="100%" height="90%">
+                  <BarChart data={byEmployee} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#444" : "#e0e0e0"} />
+                    <XAxis 
+                      dataKey="employee" 
+                      tick={{ fill: isDark ? "#ccc" : "#666", fontSize: 12 }}
+                    />
+                    <YAxis 
+                      allowDecimals={false}
+                      tick={{ fill: isDark ? "#ccc" : "#666", fontSize: 12 }}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: isDark ? '#2d3748' : '#fff',
+                        border: isDark ? '1px solid #4a5568' : '1px solid #e2e8f0',
+                        borderRadius: '8px'
+                      }}
+                    />
+                    <Bar 
+                      dataKey="completed" 
+                      fill={isDark ? "#4299e1" : "#3182ce"}
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+            </Grid.Col>
+            
+            <Grid.Col span={{ base: 12, md: 6 }}>
+              <Card withBorder radius="md" p="md" style={{ height: 400 }}>
+                <Text fw={600} mb="md" c={isDark ? "white" : "dark"}>Submissions vs Expected</Text>
+                <ResponsiveContainer width="100%" height="90%">
+                  <LineChart 
+                    data={(() => {
+                      // Calculate expected vs actual submissions for the last 7 days
+                      const days = [];
+                      const today = new Date();
+                      
+                      for (let i = 6; i >= 0; i--) {
+                        const date = new Date(today);
+                        date.setDate(date.getDate() - i);
+                        const dateStr = date.toISOString().slice(0, 10);
+                        const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                        
+                        // Calculate expected tasks for this day
+                        const expectedTasks = (checklists?.templates || []).reduce((total, template) => {
+                          const dow = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
+                          const templateDow = template.recurrence || [];
+                          if (templateDow.includes(dow)) {
+                            return total + (template.tasks || []).length;
+                          }
+                          return total;
+                        }, 0);
+                        
+                        // Calculate actual submissions for this day
+                        const actualSubmissions = filtered.filter(s => s.date === dateStr).length;
+                        
+                        days.push({
+                          day: dayName,
+                          expected: expectedTasks,
+                          submitted: actualSubmissions
+                        });
+                      }
+                      
+                      return days;
+                    })()}
+                    margin={{ top: 10, right: 10, left: 0, bottom: 10 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#444" : "#e0e0e0"} />
+                    <XAxis 
+                      dataKey="day" 
+                      tick={{ fill: isDark ? "#ccc" : "#666", fontSize: 12 }}
+                    />
+                    <YAxis 
+                      allowDecimals={false}
+                      tick={{ fill: isDark ? "#ccc" : "#666", fontSize: 12 }}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: isDark ? '#2d3748' : '#fff',
+                        border: isDark ? '1px solid #4a5568' : '1px solid #e2e8f0',
+                        borderRadius: '8px'
+                      }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="expected" 
+                      stroke={isDark ? "#10b981" : "#059669"}
+                      strokeWidth={2}
+                      dot={{ fill: isDark ? "#10b981" : "#059669", strokeWidth: 2, r: 4 }}
+                      name="Expected"
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="submitted" 
+                      stroke={isDark ? "#3b82f6" : "#2563eb"}
+                      strokeWidth={2}
+                      dot={{ fill: isDark ? "#3b82f6" : "#2563eb", strokeWidth: 2, r: 4 }}
+                      name="Submitted"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Card>
+            </Grid.Col>
+          </Grid>
+
+          {/* Additional Charts Row */}
+          <Grid mt="md">
+            <Grid.Col span={{ base: 12, md: 6 }}>
+              <Card withBorder radius="md" p="md" style={{ height: 350 }}>
+                <Text fw={600} mb="md" c={isDark ? "white" : "dark"}>Tasks by Category</Text>
+                <ResponsiveContainer width="100%" height="90%">
+                  <BarChart 
+                    data={Array.from(
+                      new Set(
+                        filtered.flatMap(s => 
+                          s.tasks.map(t => getTaskMeta(s.tasklistId, t.taskId)?.category || 'Uncategorized')
+                        )
+                      )
+                    ).map(category => ({
+                      category,
+                      count: filtered.reduce((acc, s) => 
+                        acc + s.tasks.filter(t => (getTaskMeta(s.tasklistId, t.taskId)?.category || 'Uncategorized') === category).length, 0
+                      )
+                    }))}
+                    margin={{ top: 10, right: 10, left: 0, bottom: 10 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#444" : "#e0e0e0"} />
+                    <XAxis 
+                      dataKey="category" 
+                      tick={{ fill: isDark ? "#ccc" : "#666", fontSize: 12 }}
+                    />
+                    <YAxis 
+                      allowDecimals={false}
+                      tick={{ fill: isDark ? "#ccc" : "#666", fontSize: 12 }}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: isDark ? '#2d3748' : '#fff',
+                        border: isDark ? '1px solid #4a5568' : '1px solid #e2e8f0',
+                        borderRadius: '8px'
+                      }}
+                    />
+                    <Bar 
+                      dataKey="count" 
+                      fill={isDark ? "#8b5cf6" : "#7c3aed"}
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+            </Grid.Col>
+            
+            <Grid.Col span={{ base: 12, md: 6 }}>
+              <Card withBorder radius="md" p="md" style={{ height: 350 }}>
+                <Text fw={600} mb="md" c={isDark ? "white" : "dark"}>Rework Analysis</Text>
+                <ResponsiveContainer width="100%" height="90%">
+                  <BarChart 
+                    data={[
+                      { name: 'No Rework', value: filtered.reduce((acc, s) => acc + s.tasks.filter(t => (t.reworkCount || 0) === 0).length, 0) },
+                      { name: '1 Rework', value: filtered.reduce((acc, s) => acc + s.tasks.filter(t => (t.reworkCount || 0) === 1).length, 0) },
+                      { name: '2+ Reworks', value: filtered.reduce((acc, s) => acc + s.tasks.filter(t => (t.reworkCount || 0) >= 2).length, 0) }
+                    ]}
+                    margin={{ top: 10, right: 10, left: 0, bottom: 10 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#444" : "#e0e0e0"} />
+                    <XAxis 
+                      dataKey="name" 
+                      tick={{ fill: isDark ? "#ccc" : "#666", fontSize: 12 }}
+                    />
+                    <YAxis 
+                      allowDecimals={false}
+                      tick={{ fill: isDark ? "#ccc" : "#666", fontSize: 12 }}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: isDark ? '#2d3748' : '#fff',
+                        border: isDark ? '1px solid #4a5568' : '1px solid #e2e8f0',
+                        borderRadius: '8px'
+                      }}
+                    />
+                    <Bar 
+                      dataKey="value" 
+                      fill={isDark ? "#ef4444" : "#dc2626"}
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+            </Grid.Col>
+          </Grid>
+
         </Tabs.Panel>
       </Tabs>
     </Stack>
@@ -2208,26 +3148,24 @@ function AppInner() {
               top: 100,
               zIndex: 2,
               background: 'var(--mantine-color-body)',
-              borderBottom: '1px solid var(--mantine-color-gray-3)',
             }}
           >
             <Container size="xl">
-              <Group justify="space-between" align="center" py="xs">
-                {/* Left: mini nav (no "Employee" label) */}
-                <Tabs
-                  value={employeeTab}
-                  onChange={setEmployeeTab}
-                  variant="pills"
-                  keepMounted={false}
-                  styles={{
-                    list: { gap: 6 },
-                    tab: {
-                      borderRadius: 9999,
-                      transition: 'transform 120ms ease, background-color 120ms ease',
-                    },
-                    tabLabel: { display: 'flex', alignItems: 'center', gap: 8 },
-                  }}
-                >
+              <Tabs
+                value={employeeTab}
+                onChange={setEmployeeTab}
+                variant="pills"
+                keepMounted={false}
+                styles={{
+                  list: { gap: 6 },
+                  tab: {
+                    borderRadius: 9999,
+                    transition: 'transform 120ms ease, background-color 120ms ease',
+                  },
+                  tabLabel: { display: 'flex', alignItems: 'center', gap: 8 },
+                }}
+              >
+                <Group justify="space-between" align="center" py="xs">
                   <Tabs.List>
                     <Tabs.Tab
                       value="tasks"
@@ -2262,67 +3200,67 @@ function AppInner() {
                       </Group>
                     </Tabs.Tab>
                   </Tabs.List>
-                </Tabs>
 
-                {/* Right: Filters button lives *only* in this mini nav */}
-                 <Popover
-                  opened={filtersOpen}
-                  onChange={setFiltersOpen}
-                  position="bottom-end"
-                  withArrow
-                  shadow="md"
-                  withinPortal
-                  closeOnClickOutside={false}
-                  transitionProps={{ transition: 'pop', duration: 120 }}
-                  visibleFrom="sm"
-                >
-                  <Popover.Target>
-                    <ActionIcon
-                      variant="default"
-                      title="Filters"
-                      onClick={() => setFiltersOpen(true)}
-                      aria-label="Open filters"
-                    >
-                      <IconFilter size={16} />
-                    </ActionIcon>
-                  </Popover.Target>
-                  <Popover.Dropdown>
+                  {/* Right: Filters button lives *only* in this mini nav */}
+                   <Popover
+                    opened={filtersOpen}
+                    onChange={setFiltersOpen}
+                    position="bottom-end"
+                    withArrow
+                    shadow="md"
+                    withinPortal
+                    closeOnClickOutside={false}
+                    transitionProps={{ transition: 'pop', duration: 120 }}
+                    visibleFrom="sm"
+                  >
+                    <Popover.Target>
+                      <ActionIcon
+                        variant="default"
+                        title="Filters"
+                        onClick={() => setFiltersOpen(true)}
+                        aria-label="Open filters"
+                      >
+                        <IconFilter size={16} />
+                      </ActionIcon>
+                    </Popover.Target>
+                    <Popover.Dropdown>
+                      <EmployeeFiltersForm
+                        positionFilter={positionFilter}
+                        setPositionFilter={setPositionFilter}
+                        templates={checklists.templates}
+                        onClose={() => setFiltersOpen(false)}
+                      />
+                    </Popover.Dropdown>
+                  </Popover>
+
+                  {/* Mobile: full-screen modal with same content */}
+                  <ActionIcon
+                    variant="default"
+                    title="Filters"
+                    onClick={() => setFiltersOpen(true)}
+                    aria-label="Toggle filters"
+                    hiddenFrom="sm"
+                  >
+                    <IconFilter size={16} />
+                  </ActionIcon>
+                  <Modal
+                    opened={filtersOpen}
+                    onClose={() => setFiltersOpen(false)}
+                    fullScreen
+                    padding="md"
+                    hiddenFrom="sm"
+                    title="Filters"
+                    centered={false}
+                  >
                     <EmployeeFiltersForm
                       positionFilter={positionFilter}
                       setPositionFilter={setPositionFilter}
                       templates={checklists.templates}
                       onClose={() => setFiltersOpen(false)}
                     />
-                  </Popover.Dropdown>
-                </Popover>
-
-                {/* Mobile: full-screen modal with same content */}
-                <ActionIcon
-                  variant="default"
-                  title="Filters"
-                  onClick={() => setFiltersOpen(true)}
-                  aria-label="Toggle filters"
-                  hiddenFrom="sm"
-                >
-                  <IconFilter size={16} />
-                </ActionIcon>
-                <Modal
-                  opened={filtersOpen}
-                  onClose={() => setFiltersOpen(false)}
-                  fullScreen
-                  padding="md"
-                  hiddenFrom="sm"
-                  title="Filters"
-                  centered={false}
-                >
-                  <EmployeeFiltersForm
-                    positionFilter={positionFilter}
-                    setPositionFilter={setPositionFilter}
-                    templates={checklists.templates}
-                    onClose={() => setFiltersOpen(false)}
-                  />
-                </Modal>
-              </Group>
+                  </Modal>
+                </Group>
+              </Tabs>
             </Container>
           </div>
         )}
