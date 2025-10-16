@@ -139,13 +139,32 @@ function ThemeToggle({ scheme, setScheme }) {
   );
 }
 
-function EmployeeFiltersForm({ positionFilter, setPositionFilter, templates, onClose }) {
+function EmployeeFiltersForm({ 
+  positionFilter, 
+  setPositionFilter, 
+  templates, 
+  onClose,
+  groupBy,
+  setGroupBy,
+  sortBy,
+  setSortBy
+}) {
   const [localPositionFilter, setLocalPositionFilter] = useState(positionFilter);
+  const [localGroupBy, setLocalGroupBy] = useState(groupBy);
+  const [localSortBy, setLocalSortBy] = useState(sortBy);
   
-  // Update local state when positionFilter prop changes
+  // Update local state when props change
   useEffect(() => {
     setLocalPositionFilter(positionFilter);
   }, [positionFilter]);
+
+  useEffect(() => {
+    setLocalGroupBy(groupBy);
+  }, [groupBy]);
+
+  useEffect(() => {
+    setLocalSortBy(sortBy);
+  }, [sortBy]);
   
   const positionOptions = useMemo(() => 
     Array.from(
@@ -154,36 +173,85 @@ function EmployeeFiltersForm({ positionFilter, setPositionFilter, templates, onC
     [templates]
   );
 
+  const groupByOptions = [
+    { value: 'tasklist_template', label: 'Task List Template' },
+    { value: 'timeblock', label: 'Time Block' },
+    { value: 'category', label: 'Category' },
+    { value: 'priority', label: 'Priority' },
+    { value: 'status', label: 'Status' }
+  ];
+
+  const sortByOptions = [
+    { value: 'priority', label: 'Priority' },
+    { value: 'alphabetical', label: 'Alphabetical' },
+    { value: 'completion', label: 'Completion' }
+  ];
+
   const handleApply = useCallback(() => {
     setPositionFilter(localPositionFilter);
+    setGroupBy(localGroupBy);
+    setSortBy(localSortBy);
     onClose();
-  }, [localPositionFilter, setPositionFilter, onClose]);
+  }, [localPositionFilter, localGroupBy, localSortBy, setPositionFilter, setGroupBy, setSortBy, onClose]);
 
   const handleClear = useCallback(() => {
     setLocalPositionFilter("");
+    setLocalGroupBy('tasklist_template');
+    setLocalSortBy('priority');
     setPositionFilter("");
+    setGroupBy('tasklist_template');
+    setSortBy('priority');
     onClose();
-  }, [setPositionFilter, onClose]);
+  }, [setPositionFilter, setGroupBy, setSortBy, onClose]);
 
-  const handleSelectChange = useCallback((v) => {
+  const handlePositionChange = useCallback((v) => {
     setLocalPositionFilter(v || "");
   }, []);
 
+  const handleGroupByChange = useCallback((v) => {
+    setLocalGroupBy(v);
+  }, []);
+
+  const handleSortByChange = useCallback((v) => {
+    setLocalSortBy(v);
+  }, []);
+
   return (
-    <Stack gap="sm" p="xs" style={{ minWidth: 280 }}>
-      <Text fw={600}>Filters</Text>
+    <Stack gap="md" p="xs" style={{ minWidth: 320 }}>
+      <Text fw={600}>Filters & Grouping</Text>
+      
+      {/* Position Filter */}
       <Select
         label="Position"
         placeholder="All positions"
         value={localPositionFilter}
-        onChange={handleSelectChange}
+        onChange={handlePositionChange}
         data={positionOptions}
         clearable
         searchable
         comboboxProps={{ withinPortal: false }}
       />
+
+      {/* Group By Control */}
+      <Select
+        label="Group by"
+        value={localGroupBy}
+        onChange={handleGroupByChange}
+        data={groupByOptions}
+        comboboxProps={{ withinPortal: false }}
+      />
+
+      {/* Sort By Control */}
+      <Select
+        label="Sort by"
+        value={localSortBy}
+        onChange={handleSortByChange}
+        data={sortByOptions}
+        comboboxProps={{ withinPortal: false }}
+      />
+
       <Group justify="space-between" mt="xs">
-        <Button variant="light" onClick={handleClear}>Clear</Button>
+        <Button variant="light" onClick={handleClear}>Clear All</Button>
         <Button onClick={handleApply}>Apply</Button>
       </Group>
     </Stack>
@@ -328,7 +396,7 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
               </div>
             </div>
             {/* Sign & Submit button integrated into header */}
-            {groupBy === 'timeblock' && (
+            {(groupBy === 'timeblock' || groupBy === 'tasklist_template') && (
               <Button 
                 onClick={() => signoff(tasklist)} 
                 disabled={!canSubmit}
@@ -594,12 +662,14 @@ function EmployeeView({
   tab,
   onRestockOpenCountChange,
   employees,
-  currentEmployee
+  currentEmployee,
+  groupBy,
+  setGroupBy,
+  sortBy,
+  setSortBy
 }) {
   const [openLists, setOpenLists] = React.useState({});
   const [openTasks, setOpenTasks] = React.useState({});
-  const [groupBy, setGroupBy] = React.useState('timeblock'); // 'timeblock', 'category', 'priority', 'status'
-  const [sortBy, setSortBy] = React.useState('priority'); // 'priority', 'alphabetical', 'completion'
 
   // Restock state
   const [restock, setRestock] = React.useState({ category: 'Food', item: '', quantity: 1, urgency: 'normal', notes: '', requestedBy: currentEmployee || '' });
@@ -707,6 +777,10 @@ function EmployeeView({
       let groupTitle;
       
       switch (groupBy) {
+        case 'tasklist_template':
+          groupKey = task.tasklist.id || 'no-template';
+          groupTitle = task.tasklist.name || 'No Template';
+          break;
         case 'timeblock':
           groupKey = task.tasklist.timeBlockId || 'no-timeblock';
           groupTitle = getTimeBlockLabelFromLists(checklists.timeBlocks, task.tasklist.timeBlockId) || 'No Time Block';
@@ -894,7 +968,7 @@ function EmployeeView({
           })}
           
           {/* Overall Sign & Submit for non-timeblock groupings */}
-          {groupBy !== 'timeblock' && tasklists.length > 0 && (
+          {groupBy !== 'timeblock' && groupBy !== 'tasklist_template' && tasklists.length > 0 && (
             <Card withBorder radius="lg" shadow="sm" style={{ 
               background: isDark ? 'var(--mantine-color-blue-9)' : 'var(--mantine-color-blue-0)',
               borderColor: 'var(--mantine-color-blue-6)'
@@ -2440,6 +2514,8 @@ function AppInner() {
   const [employees, setEmployees] = useState([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [positionFilter, setPositionFilter] = useState("");
+  const [groupBy, setGroupBy] = useState('tasklist_template'); // 'timeblock', 'category', 'priority', 'status', 'tasklist_template'
+  const [sortBy, setSortBy] = useState('priority'); // 'priority', 'alphabetical', 'completion'
   const [company, setCompany] = useState({ id: "", name: "", brandColor: "#0ea5e9", logo: null, timezone: "UTC" });
   const [checklists, setChecklists] = useState({ timeBlocks: [], templates: [], overrides: [] });
   const ModeTabsText = [
@@ -3229,6 +3305,10 @@ function AppInner() {
                         setPositionFilter={setPositionFilter}
                         templates={checklists.templates}
                         onClose={() => setFiltersOpen(false)}
+                        groupBy={groupBy}
+                        setGroupBy={setGroupBy}
+                        sortBy={sortBy}
+                        setSortBy={setSortBy}
                       />
                     </Popover.Dropdown>
                   </Popover>
@@ -3249,7 +3329,7 @@ function AppInner() {
                     fullScreen
                     padding="md"
                     hiddenFrom="sm"
-                    title="Filters"
+                    title="Filters & Grouping"
                     centered={false}
                   >
                     <EmployeeFiltersForm
@@ -3257,6 +3337,10 @@ function AppInner() {
                       setPositionFilter={setPositionFilter}
                       templates={checklists.templates}
                       onClose={() => setFiltersOpen(false)}
+                      groupBy={groupBy}
+                      setGroupBy={setGroupBy}
+                      sortBy={sortBy}
+                      setSortBy={setSortBy}
                     />
                   </Modal>
                 </Group>
@@ -3290,6 +3374,10 @@ function AppInner() {
                   onRestockOpenCountChange={setRestockOpenCount}
                   employees={employees}
                   currentEmployee={currentEmployee}
+                  groupBy={groupBy}
+                  setGroupBy={setGroupBy}
+                  sortBy={sortBy}
+                  setSortBy={setSortBy}
                 />
               )}
               {mode === "manager" && (

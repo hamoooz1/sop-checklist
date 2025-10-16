@@ -66,7 +66,9 @@ export default function Root() {
   return (
     <BrowserRouter>
       {!session ? (
-        <MarketingApp />
+        <MantineProvider>
+          <MarketingApp />
+        </MantineProvider>
       ) : profileLoading ? (
         <MantineProvider>
           <AppShell padding="md">
