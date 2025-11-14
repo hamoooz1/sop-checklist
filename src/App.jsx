@@ -139,32 +139,13 @@ function ThemeToggle({ scheme, setScheme }) {
   );
 }
 
-function EmployeeFiltersForm({ 
-  positionFilter, 
-  setPositionFilter, 
-  templates, 
-  onClose,
-  groupBy,
-  setGroupBy,
-  sortBy,
-  setSortBy
-}) {
+function EmployeeFiltersForm({ positionFilter, setPositionFilter, templates, onClose }) {
   const [localPositionFilter, setLocalPositionFilter] = useState(positionFilter);
-  const [localGroupBy, setLocalGroupBy] = useState(groupBy);
-  const [localSortBy, setLocalSortBy] = useState(sortBy);
   
-  // Update local state when props change
+  // Update local state when positionFilter prop changes
   useEffect(() => {
     setLocalPositionFilter(positionFilter);
   }, [positionFilter]);
-
-  useEffect(() => {
-    setLocalGroupBy(groupBy);
-  }, [groupBy]);
-
-  useEffect(() => {
-    setLocalSortBy(sortBy);
-  }, [sortBy]);
   
   const positionOptions = useMemo(() => 
     Array.from(
@@ -173,124 +154,273 @@ function EmployeeFiltersForm({
     [templates]
   );
 
-  const groupByOptions = [
-    { value: 'tasklist_template', label: 'Task List Template' },
-    { value: 'timeblock', label: 'Time Block' },
-    { value: 'category', label: 'Category' },
-    { value: 'priority', label: 'Priority' },
-    { value: 'status', label: 'Status' }
-  ];
-
-  const sortByOptions = [
-    { value: 'priority', label: 'Priority' },
-    { value: 'alphabetical', label: 'Alphabetical' },
-    { value: 'completion', label: 'Completion' }
-  ];
-
   const handleApply = useCallback(() => {
     setPositionFilter(localPositionFilter);
-    setGroupBy(localGroupBy);
-    setSortBy(localSortBy);
     onClose();
-  }, [localPositionFilter, localGroupBy, localSortBy, setPositionFilter, setGroupBy, setSortBy, onClose]);
+  }, [localPositionFilter, setPositionFilter, onClose]);
 
   const handleClear = useCallback(() => {
     setLocalPositionFilter("");
-    setLocalGroupBy('tasklist_template');
-    setLocalSortBy('priority');
     setPositionFilter("");
-    setGroupBy('tasklist_template');
-    setSortBy('priority');
     onClose();
-  }, [setPositionFilter, setGroupBy, setSortBy, onClose]);
+  }, [setPositionFilter, onClose]);
 
-  const handlePositionChange = useCallback((v) => {
+  const handleSelectChange = useCallback((v) => {
     setLocalPositionFilter(v || "");
   }, []);
 
-  const handleGroupByChange = useCallback((v) => {
-    setLocalGroupBy(v);
-  }, []);
-
-  const handleSortByChange = useCallback((v) => {
-    setLocalSortBy(v);
-  }, []);
-
   return (
-    <Stack gap="md" p="xs" style={{ minWidth: 320 }}>
-      <Text fw={600}>Filters & Grouping</Text>
-      
-      {/* Position Filter */}
+    <Stack gap="sm" p="xs" style={{ minWidth: 280 }}>
+      <Text fw={600}>Filters</Text>
       <Select
         label="Position"
         placeholder="All positions"
         value={localPositionFilter}
-        onChange={handlePositionChange}
+        onChange={handleSelectChange}
         data={positionOptions}
         clearable
         searchable
         comboboxProps={{ withinPortal: false }}
       />
-
-      {/* Group By Control */}
-      <Select
-        label="Group by"
-        value={localGroupBy}
-        onChange={handleGroupByChange}
-        data={groupByOptions}
-        comboboxProps={{ withinPortal: false }}
-      />
-
-      {/* Sort By Control */}
-      <Select
-        label="Sort by"
-        value={localSortBy}
-        onChange={handleSortByChange}
-        data={sortByOptions}
-        comboboxProps={{ withinPortal: false }}
-      />
-
       <Group justify="space-between" mt="xs">
-        <Button variant="light" onClick={handleClear}>Clear All</Button>
+        <Button variant="light" onClick={handleClear}>Clear</Button>
         <Button onClick={handleApply}>Apply</Button>
       </Group>
     </Stack>
   );
 }
 
+/** ---------------------- PIN Pad Component ---------------------- */
+function PinPad({ onNumberClick, onBackspace, onClear }) {
+  const { colorScheme } = useMantineColorScheme();
+  const computed = useComputedColorScheme('light');
+  const isDark = computed === 'dark';
+
+  const handleClick = (value) => {
+    if (value === 'backspace') {
+      onBackspace?.();
+    } else if (value === 'clear') {
+      onClear?.();
+    } else {
+      onNumberClick?.(value);
+    }
+  };
+
+  const buttonProps = {
+    size: 'lg',
+    style: {
+      height: 64,
+      fontSize: '1.5rem',
+      fontWeight: 700,
+    },
+    variant: 'outline',
+  };
+
+  return (
+    <Grid gutter="sm">
+      {[1, 2, 3].map(num => (
+        <Grid.Col key={num} span={4}>
+          <Button
+            {...buttonProps}
+            onClick={() => handleClick(num)}
+            fullWidth
+          >
+            {num}
+          </Button>
+        </Grid.Col>
+      ))}
+      {[4, 5, 6].map(num => (
+        <Grid.Col key={num} span={4}>
+          <Button
+            {...buttonProps}
+            onClick={() => handleClick(num)}
+            fullWidth
+          >
+            {num}
+          </Button>
+        </Grid.Col>
+      ))}
+      {[7, 8, 9].map(num => (
+        <Grid.Col key={num} span={4}>
+          <Button
+            {...buttonProps}
+            onClick={() => handleClick(num)}
+            fullWidth
+          >
+            {num}
+          </Button>
+        </Grid.Col>
+      ))}
+      <Grid.Col span={4}>
+        <Button
+          {...buttonProps}
+          onClick={() => handleClick('clear')}
+          fullWidth
+          color="orange"
+          variant="light"
+        >
+          C
+        </Button>
+      </Grid.Col>
+      <Grid.Col span={4}>
+        <Button
+          {...buttonProps}
+          onClick={() => handleClick(0)}
+          fullWidth
+        >
+          0
+        </Button>
+      </Grid.Col>
+      <Grid.Col span={4}>
+        <Button
+          {...buttonProps}
+          onClick={() => handleClick('backspace')}
+          fullWidth
+          color="red"
+          variant="light"
+        >
+          ⌫
+        </Button>
+      </Grid.Col>
+    </Grid>
+  );
+}
+
 /** ---------------------- Pin Modal ---------------------- */
 function PinDialog({ opened, onClose, onConfirm }) {
   const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
 
   // Clear when the modal opens
   useEffect(() => {
-    if (opened) setPin('');
+    if (opened) {
+      setPin('');
+      setError('');
+    }
   }, [opened]);
 
   const handleClose = () => {
     setPin('');
+    setError('');
     onClose?.();
   };
 
+  const handleNumberClick = (num) => {
+    if (pin.length < 6) {
+      setPin(prev => prev + String(num));
+      setError('');
+    }
+  };
+
+  const handleBackspace = () => {
+    setPin(prev => prev.slice(0, -1));
+    setError('');
+  };
+
+  const handleClear = () => {
+    setPin('');
+    setError('');
+  };
+
   const handleConfirm = () => {
+    if (pin.length === 0) {
+      setError('Please enter a PIN');
+      return;
+    }
     const p = pin;
-    setPin('');              // clear immediately so it never “sticks”
+    setPin('');              // clear immediately so it never "sticks"
+    setError('');
     onConfirm?.(p);
   };
 
+  // Handle keyboard input as fallback
+  const handleKeyPress = (e) => {
+    if (e.key >= '0' && e.key <= '9') {
+      handleNumberClick(e.key);
+    } else if (e.key === 'Backspace') {
+      handleBackspace();
+    } else if (e.key === 'Enter') {
+      handleConfirm();
+    } else if (e.key === 'Escape') {
+      handleClose();
+    }
+  };
+
   return (
-    <Modal opened={opened} onClose={handleClose} title="Enter PIN" centered>
-      <Stack gap="sm">
+    <Modal 
+      opened={opened} 
+      onClose={handleClose} 
+      title="Enter PIN" 
+      centered
+      size="sm"
+      styles={{
+        content: {
+          maxWidth: 400,
+        }
+      }}
+    >
+      <Stack gap="md">
+        {/* PIN Display */}
+        <Center>
+          <Group gap="md" justify="center" mb="xs">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div
+                key={i}
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  border: `3px solid ${i < pin.length 
+                    ? 'var(--mantine-color-blue-6)' 
+                    : 'var(--mantine-color-gray-4)'}`,
+                  background: i < pin.length 
+                    ? 'var(--mantine-color-blue-6)' 
+                    : 'transparent',
+                  transition: 'all 0.2s ease',
+                }}
+              />
+            ))}
+          </Group>
+        </Center>
+
+        {/* Hidden input for keyboard support */}
         <TextInput
-          type="password"
-          placeholder="••••"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={pin}
-          onChange={(e) => setPin(e.currentTarget.value)}
+          onChange={(e) => {
+            const value = e.currentTarget.value.replace(/\D/g, '').slice(0, 6);
+            setPin(value);
+            setError('');
+          }}
+          onKeyDown={handleKeyPress}
           autoFocus
+          style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+          tabIndex={-1}
         />
-        <Group justify="flex-end">
+
+        {/* Error message */}
+        {error && (
+          <Text size="sm" c="red" ta="center">{error}</Text>
+        )}
+
+        {/* PIN Pad */}
+        <PinPad
+          onNumberClick={handleNumberClick}
+          onBackspace={handleBackspace}
+          onClear={handleClear}
+        />
+
+        {/* Action buttons */}
+        <Group justify="flex-end" mt="sm">
           <Button variant="default" onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleConfirm}>Confirm</Button>
+          <Button 
+            onClick={handleConfirm}
+            disabled={pin.length === 0}
+          >
+            Confirm
+          </Button>
         </Group>
       </Stack>
     </Modal>
@@ -396,7 +526,7 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
               </div>
             </div>
             {/* Sign & Submit button integrated into header */}
-            {(groupBy === 'timeblock' || groupBy === 'tasklist_template') && (
+            {groupBy === 'timeblock' && (
               <Button 
                 onClick={() => signoff(tasklist)} 
                 disabled={!canSubmit}
@@ -662,14 +792,12 @@ function EmployeeView({
   tab,
   onRestockOpenCountChange,
   employees,
-  currentEmployee,
-  groupBy,
-  setGroupBy,
-  sortBy,
-  setSortBy
+  currentEmployee
 }) {
   const [openLists, setOpenLists] = React.useState({});
   const [openTasks, setOpenTasks] = React.useState({});
+  const [groupBy, setGroupBy] = React.useState('timeblock'); // 'timeblock', 'category', 'priority', 'status'
+  const [sortBy, setSortBy] = React.useState('priority'); // 'priority', 'alphabetical', 'completion'
 
   // Restock state
   const [restock, setRestock] = React.useState({ category: 'Food', item: '', quantity: 1, urgency: 'normal', notes: '', requestedBy: currentEmployee || '' });
@@ -777,10 +905,6 @@ function EmployeeView({
       let groupTitle;
       
       switch (groupBy) {
-        case 'tasklist_template':
-          groupKey = task.tasklist.id || 'no-template';
-          groupTitle = task.tasklist.name || 'No Template';
-          break;
         case 'timeblock':
           groupKey = task.tasklist.timeBlockId || 'no-timeblock';
           groupTitle = getTimeBlockLabelFromLists(checklists.timeBlocks, task.tasklist.timeBlockId) || 'No Time Block';
@@ -968,7 +1092,7 @@ function EmployeeView({
           })}
           
           {/* Overall Sign & Submit for non-timeblock groupings */}
-          {groupBy !== 'timeblock' && groupBy !== 'tasklist_template' && tasklists.length > 0 && (
+          {groupBy !== 'timeblock' && tasklists.length > 0 && (
             <Card withBorder radius="lg" shadow="sm" style={{ 
               background: isDark ? 'var(--mantine-color-blue-9)' : 'var(--mantine-color-blue-0)',
               borderColor: 'var(--mantine-color-blue-6)'
@@ -2514,8 +2638,6 @@ function AppInner() {
   const [employees, setEmployees] = useState([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [positionFilter, setPositionFilter] = useState("");
-  const [groupBy, setGroupBy] = useState('tasklist_template'); // 'timeblock', 'category', 'priority', 'status', 'tasklist_template'
-  const [sortBy, setSortBy] = useState('priority'); // 'priority', 'alphabetical', 'completion'
   const [company, setCompany] = useState({ id: "", name: "", brandColor: "#0ea5e9", logo: null, timezone: "UTC" });
   const [checklists, setChecklists] = useState({ timeBlocks: [], templates: [], overrides: [] });
   const ModeTabsText = [
@@ -2894,7 +3016,11 @@ function AppInner() {
         try {
           // 1) Validate PIN *per company* every time
           const user = await validatePin({ supabase, companyId: company.id, pin });
-          if (!user) { alert('Wrong PIN'); return; }
+          if (!user) { 
+            alert('Wrong PIN. Please try again.'); 
+            // Don't close modal on wrong PIN - let user try again
+            return; 
+          }
 
           // 2) Find/create submission for today
           const dateISO = todayISOInTz(company.timezone || 'UTC');
@@ -2973,11 +3099,13 @@ function AppInner() {
               ti.taskId === task.id ? { ...ti, status: 'Complete', reviewStatus: 'Pending' } : ti
             ),
           }));
+
+          // Only close modal on successful completion
+          setPinModal({ open: false, onConfirm: null });
         } catch (e) {
           console.error(e);
           alert(e.message || 'Failed to complete task');
-        } finally {
-          setPinModal({ open: false, onConfirm: null });
+          // Don't close modal on error - let user try again
         }
       },
     });
@@ -3054,27 +3182,43 @@ function AppInner() {
     }
     setPinModal({
       open: true,
-      onConfirm: (pin) => {
-        const payload = (working[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" }));
-        const submission = {
-          id: `ci_${Date.now()}`,
-          tasklistId: tl.id,
-          tasklistName: tl.name,
-          locationId: tl.locationId,
-          date: todayISO(),
-          status: "Pending",
-          signedBy: `PIN-${pin}`,
-          submittedBy: currentEmployee,
-          signedAt: new Date().toISOString(),
-          tasks: payload,
-        };
-        setSubmissions((prev) => [submission, ...prev]);
-        setWorking((prev) => ({
-          ...prev,
-          [tl.id]: (prev[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" })),
-        }));
-        setPinModal({ open: false, onConfirm: null });
-        alert("Submitted for manager review.");
+      onConfirm: async (pin) => {
+        try {
+          // Validate PIN before submission
+          const user = await validatePin({ supabase, companyId: company.id, pin });
+          if (!user) { 
+            alert('Wrong PIN. Please try again.'); 
+            // Don't close modal on wrong PIN - let user try again
+            return; 
+          }
+
+          const payload = (working[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" }));
+          const submission = {
+            id: `ci_${Date.now()}`,
+            tasklistId: tl.id,
+            tasklistName: tl.name,
+            locationId: tl.locationId,
+            date: todayISO(),
+            status: "Pending",
+            signedBy: `PIN-${pin}`,
+            submittedBy: currentEmployee,
+            signedAt: new Date().toISOString(),
+            tasks: payload,
+          };
+          setSubmissions((prev) => [submission, ...prev]);
+          setWorking((prev) => ({
+            ...prev,
+            [tl.id]: (prev[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" })),
+          }));
+          
+          // Only close modal on successful submission
+          setPinModal({ open: false, onConfirm: null });
+          alert("Submitted for manager review.");
+        } catch (e) {
+          console.error(e);
+          alert(e.message || 'Failed to submit tasklist');
+          // Don't close modal on error - let user try again
+        }
       },
     });
   }
@@ -3305,10 +3449,6 @@ function AppInner() {
                         setPositionFilter={setPositionFilter}
                         templates={checklists.templates}
                         onClose={() => setFiltersOpen(false)}
-                        groupBy={groupBy}
-                        setGroupBy={setGroupBy}
-                        sortBy={sortBy}
-                        setSortBy={setSortBy}
                       />
                     </Popover.Dropdown>
                   </Popover>
@@ -3329,7 +3469,7 @@ function AppInner() {
                     fullScreen
                     padding="md"
                     hiddenFrom="sm"
-                    title="Filters & Grouping"
+                    title="Filters"
                     centered={false}
                   >
                     <EmployeeFiltersForm
@@ -3337,10 +3477,6 @@ function AppInner() {
                       setPositionFilter={setPositionFilter}
                       templates={checklists.templates}
                       onClose={() => setFiltersOpen(false)}
-                      groupBy={groupBy}
-                      setGroupBy={setGroupBy}
-                      sortBy={sortBy}
-                      setSortBy={setSortBy}
                     />
                   </Modal>
                 </Group>
@@ -3374,10 +3510,6 @@ function AppInner() {
                   onRestockOpenCountChange={setRestockOpenCount}
                   employees={employees}
                   currentEmployee={currentEmployee}
-                  groupBy={groupBy}
-                  setGroupBy={setGroupBy}
-                  sortBy={sortBy}
-                  setSortBy={setSortBy}
                 />
               )}
               {mode === "manager" && (
