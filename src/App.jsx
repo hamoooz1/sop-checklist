@@ -192,10 +192,6 @@ function EmployeeFiltersForm({ positionFilter, setPositionFilter, templates, onC
 
 /** ---------------------- PIN Pad Component ---------------------- */
 function PinPad({ onNumberClick, onBackspace, onClear }) {
-  const { colorScheme } = useMantineColorScheme();
-  const computed = useComputedColorScheme('light');
-  const isDark = computed === 'dark';
-
   const handleClick = (value) => {
     if (value === 'backspace') {
       onBackspace?.();
@@ -206,24 +202,44 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
     }
   };
 
-  const buttonProps = {
-    size: 'lg',
-    style: {
-      height: 64,
-      fontSize: '1.5rem',
-      fontWeight: 700,
-    },
-    variant: 'outline',
+  const buttonStyle = {
+    height: 72,
+    fontSize: '1.75rem',
+    fontWeight: 400,
+    backgroundColor: '#ffffff',
+    color: '#1a1a1a',
+    border: '1px solid #e5e5e5',
+    borderRadius: '12px',
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)',
+    transition: 'all 0.15s ease',
+  };
+
+  const actionButtonStyle = {
+    ...buttonStyle,
+    fontSize: '1.25rem',
+    color: '#666666',
   };
 
   return (
-    <Grid gutter="sm">
+    <Grid gutter={12}>
       {[1, 2, 3].map(num => (
         <Grid.Col key={num} span={4}>
           <Button
-            {...buttonProps}
             onClick={() => handleClick(num)}
             fullWidth
+            style={buttonStyle}
+            onMouseDown={(e) => {
+              e.currentTarget.style.transform = 'scale(0.96)';
+              e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+            }}
           >
             {num}
           </Button>
@@ -232,9 +248,21 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
       {[4, 5, 6].map(num => (
         <Grid.Col key={num} span={4}>
           <Button
-            {...buttonProps}
             onClick={() => handleClick(num)}
             fullWidth
+            style={buttonStyle}
+            onMouseDown={(e) => {
+              e.currentTarget.style.transform = 'scale(0.96)';
+              e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+            }}
           >
             {num}
           </Button>
@@ -243,9 +271,21 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
       {[7, 8, 9].map(num => (
         <Grid.Col key={num} span={4}>
           <Button
-            {...buttonProps}
             onClick={() => handleClick(num)}
             fullWidth
+            style={buttonStyle}
+            onMouseDown={(e) => {
+              e.currentTarget.style.transform = 'scale(0.96)';
+              e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+            }}
           >
             {num}
           </Button>
@@ -253,31 +293,63 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
       ))}
       <Grid.Col span={4}>
         <Button
-          {...buttonProps}
           onClick={() => handleClick('clear')}
           fullWidth
-          color="orange"
-          variant="light"
+          style={actionButtonStyle}
+          onMouseDown={(e) => {
+            e.currentTarget.style.transform = 'scale(0.96)';
+            e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+          }}
         >
-          C
+          Clear
         </Button>
       </Grid.Col>
       <Grid.Col span={4}>
         <Button
-          {...buttonProps}
           onClick={() => handleClick(0)}
           fullWidth
+          style={buttonStyle}
+          onMouseDown={(e) => {
+            e.currentTarget.style.transform = 'scale(0.96)';
+            e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+          }}
         >
           0
         </Button>
       </Grid.Col>
       <Grid.Col span={4}>
         <Button
-          {...buttonProps}
           onClick={() => handleClick('backspace')}
           fullWidth
-          color="red"
-          variant="light"
+          style={actionButtonStyle}
+          onMouseDown={(e) => {
+            e.currentTarget.style.transform = 'scale(0.96)';
+            e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
+          }}
         >
           ⌫
         </Button>
@@ -350,37 +422,43 @@ function PinDialog({ opened, onClose, onConfirm }) {
     <Modal 
       opened={opened} 
       onClose={handleClose} 
-      title="Enter PIN" 
+      title={null}
       centered
       size="sm"
+      withCloseButton={false}
+      closeOnClickOutside={false}
       styles={{
         content: {
-          maxWidth: 400,
+          maxWidth: 360,
+          padding: '32px 24px',
+        },
+        body: {
+          padding: 0,
         }
       }}
     >
-      <Stack gap="md">
+      <Stack gap={32}>
         {/* PIN Display */}
         <Center>
-          <Group gap="md" justify="center" mb="xs">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
-              <div
-                key={i}
-                style={{
-                  width: 20,
-                  height: 20,
-                  borderRadius: '50%',
-                  border: `3px solid ${i < pin.length 
-                    ? 'var(--mantine-color-blue-6)' 
-                    : 'var(--mantine-color-gray-4)'}`,
-                  background: i < pin.length 
-                    ? 'var(--mantine-color-blue-6)' 
-                    : 'transparent',
-                  transition: 'all 0.2s ease',
-                }}
-              />
-            ))}
-          </Group>
+          <Stack gap={16} align="center">
+            <Text size="lg" fw={500} c="dimmed" style={{ letterSpacing: '0.5px' }}>
+              Enter PIN
+            </Text>
+            <Group gap={12} justify="center">
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: '50%',
+                    backgroundColor: i < pin.length ? '#1a1a1a' : '#e5e5e5',
+                    transition: 'all 0.2s ease',
+                  }}
+                />
+              ))}
+            </Group>
+          </Stack>
         </Center>
 
         {/* Hidden input for keyboard support */}
@@ -402,7 +480,7 @@ function PinDialog({ opened, onClose, onConfirm }) {
 
         {/* Error message */}
         {error && (
-          <Text size="sm" c="red" ta="center">{error}</Text>
+          <Text size="sm" c="red" ta="center" style={{ minHeight: 20 }}>{error}</Text>
         )}
 
         {/* PIN Pad */}
@@ -413,11 +491,26 @@ function PinDialog({ opened, onClose, onConfirm }) {
         />
 
         {/* Action buttons */}
-        <Group justify="flex-end" mt="sm">
-          <Button variant="default" onClick={handleClose}>Cancel</Button>
+        <Group justify="flex-end" gap={12}>
+          <Button 
+            variant="subtle" 
+            onClick={handleClose}
+            style={{
+              color: '#666666',
+              fontWeight: 400,
+            }}
+          >
+            Cancel
+          </Button>
           <Button 
             onClick={handleConfirm}
             disabled={pin.length === 0}
+            style={{
+              backgroundColor: pin.length > 0 ? '#1a1a1a' : '#e5e5e5',
+              color: pin.length > 0 ? '#ffffff' : '#999999',
+              fontWeight: 400,
+              transition: 'all 0.2s ease',
+            }}
           >
             Confirm
           </Button>
