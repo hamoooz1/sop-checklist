@@ -192,6 +192,10 @@ function EmployeeFiltersForm({ positionFilter, setPositionFilter, templates, onC
 
 /** ---------------------- PIN Pad Component ---------------------- */
 function PinPad({ onNumberClick, onBackspace, onClear }) {
+  const { colorScheme } = useMantineColorScheme();
+  const computed = useComputedColorScheme('light');
+  const isDark = computed === 'dark';
+
   const handleClick = (value) => {
     if (value === 'backspace') {
       onBackspace?.();
@@ -202,22 +206,46 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
     }
   };
 
-  const buttonStyle = {
-    height: 72,
-    fontSize: '1.75rem',
-    fontWeight: 400,
-    backgroundColor: '#ffffff',
-    color: '#1a1a1a',
-    border: '1px solid #e5e5e5',
-    borderRadius: '12px',
-    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)',
-    transition: 'all 0.15s ease',
+  const buttonStyles = {
+    root: {
+      height: 72,
+      fontSize: '1.75rem',
+      fontWeight: 400,
+      backgroundColor: isDark ? '#2c2c2c' : '#ffffff',
+      color: isDark ? '#ffffff' : '#1a1a1a',
+      border: isDark ? '1px solid #404040' : '1px solid #e5e5e5',
+      borderRadius: '12px',
+      boxShadow: isDark ? '0 1px 3px rgba(0, 0, 0, 0.3)' : '0 1px 3px rgba(0, 0, 0, 0.08)',
+      transition: 'all 0.15s ease',
+      '&:hover': {
+        backgroundColor: isDark ? '#353535' : '#ffffff',
+        border: isDark ? '1px solid #404040' : '1px solid #e5e5e5',
+      },
+      '&:active': {
+        backgroundColor: isDark ? '#353535' : '#ffffff',
+      }
+    }
   };
 
-  const actionButtonStyle = {
-    ...buttonStyle,
-    fontSize: '1.25rem',
-    color: '#666666',
+  const actionButtonStyles = {
+    root: {
+      height: 72,
+      fontSize: '1.25rem',
+      fontWeight: 400,
+      backgroundColor: isDark ? '#2c2c2c' : '#ffffff',
+      color: isDark ? '#b0b0b0' : '#666666',
+      border: isDark ? '1px solid #404040' : '1px solid #e5e5e5',
+      borderRadius: '12px',
+      boxShadow: isDark ? '0 1px 3px rgba(0, 0, 0, 0.3)' : '0 1px 3px rgba(0, 0, 0, 0.08)',
+      transition: 'all 0.15s ease',
+      '&:hover': {
+        backgroundColor: isDark ? '#353535' : '#ffffff',
+        border: isDark ? '1px solid #404040' : '1px solid #e5e5e5',
+      },
+      '&:active': {
+        backgroundColor: isDark ? '#353535' : '#ffffff',
+      }
+    }
   };
 
   return (
@@ -227,7 +255,7 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
           <Button
             onClick={() => handleClick(num)}
             fullWidth
-            style={buttonStyle}
+            styles={buttonStyles}
             onMouseDown={(e) => {
               e.currentTarget.style.transform = 'scale(0.96)';
               e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
@@ -250,7 +278,7 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
           <Button
             onClick={() => handleClick(num)}
             fullWidth
-            style={buttonStyle}
+            styles={buttonStyles}
             onMouseDown={(e) => {
               e.currentTarget.style.transform = 'scale(0.96)';
               e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
@@ -273,7 +301,7 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
           <Button
             onClick={() => handleClick(num)}
             fullWidth
-            style={buttonStyle}
+            styles={buttonStyles}
             onMouseDown={(e) => {
               e.currentTarget.style.transform = 'scale(0.96)';
               e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
@@ -295,7 +323,7 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
         <Button
           onClick={() => handleClick('clear')}
           fullWidth
-          style={actionButtonStyle}
+          styles={actionButtonStyles}
           onMouseDown={(e) => {
             e.currentTarget.style.transform = 'scale(0.96)';
             e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
@@ -316,7 +344,7 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
         <Button
           onClick={() => handleClick(0)}
           fullWidth
-          style={buttonStyle}
+          styles={buttonStyles}
           onMouseDown={(e) => {
             e.currentTarget.style.transform = 'scale(0.96)';
             e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
@@ -337,7 +365,7 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
         <Button
           onClick={() => handleClick('backspace')}
           fullWidth
-          style={actionButtonStyle}
+          styles={actionButtonStyles}
           onMouseDown={(e) => {
             e.currentTarget.style.transform = 'scale(0.96)';
             e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
@@ -362,6 +390,9 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
 function PinDialog({ opened, onClose, onConfirm }) {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const { colorScheme } = useMantineColorScheme();
+  const computed = useComputedColorScheme('light');
+  const isDark = computed === 'dark';
 
   // Clear when the modal opens
   useEffect(() => {
@@ -418,6 +449,15 @@ function PinDialog({ opened, onClose, onConfirm }) {
     }
   };
 
+  const modalBg = isDark ? '#1a1a1a' : '#ffffff';
+  const textColor = isDark ? '#e0e0e0' : '#666666';
+  const dotFilled = isDark ? '#ffffff' : '#1a1a1a';
+  const dotEmpty = isDark ? '#404040' : '#e5e5e5';
+  const confirmBg = pin.length > 0 ? (isDark ? '#ffffff' : '#1a1a1a') : (isDark ? '#2c2c2c' : '#e5e5e5');
+  const confirmColor = pin.length > 0 ? (isDark ? '#1a1a1a' : '#ffffff') : (isDark ? '#666666' : '#999999');
+  const cancelColor = isDark ? '#b0b0b0' : '#666666';
+  const cancelHover = isDark ? '#2c2c2c' : '#f5f5f5';
+
   return (
     <Modal 
       opened={opened} 
@@ -431,17 +471,29 @@ function PinDialog({ opened, onClose, onConfirm }) {
         content: {
           maxWidth: 360,
           padding: '32px 24px',
+          backgroundColor: modalBg,
         },
         body: {
           padding: 0,
+          backgroundColor: modalBg,
+        },
+        overlay: {
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
         }
       }}
     >
-      <Stack gap={32}>
+      <Stack gap={32} style={{ backgroundColor: modalBg }}>
         {/* PIN Display */}
         <Center>
           <Stack gap={16} align="center">
-            <Text size="lg" fw={500} c="dimmed" style={{ letterSpacing: '0.5px' }}>
+            <Text 
+              size="lg" 
+              fw={500} 
+              style={{ 
+                letterSpacing: '0.5px',
+                color: textColor,
+              }}
+            >
               Enter PIN
             </Text>
             <Group gap={12} justify="center">
@@ -452,7 +504,7 @@ function PinDialog({ opened, onClose, onConfirm }) {
                     width: 12,
                     height: 12,
                     borderRadius: '50%',
-                    backgroundColor: i < pin.length ? '#1a1a1a' : '#e5e5e5',
+                    backgroundColor: i < pin.length ? dotFilled : dotEmpty,
                     transition: 'all 0.2s ease',
                   }}
                 />
@@ -480,7 +532,7 @@ function PinDialog({ opened, onClose, onConfirm }) {
 
         {/* Error message */}
         {error && (
-          <Text size="sm" c="red" ta="center" style={{ minHeight: 20 }}>{error}</Text>
+          <Text size="sm" ta="center" style={{ minHeight: 20, color: '#ff6b6b' }}>{error}</Text>
         )}
 
         {/* PIN Pad */}
@@ -495,9 +547,15 @@ function PinDialog({ opened, onClose, onConfirm }) {
           <Button 
             variant="subtle" 
             onClick={handleClose}
-            style={{
-              color: '#666666',
-              fontWeight: 400,
+            styles={{
+              root: {
+                backgroundColor: 'transparent',
+                color: cancelColor,
+                fontWeight: 400,
+                '&:hover': {
+                  backgroundColor: cancelHover,
+                }
+              }
             }}
           >
             Cancel
@@ -505,11 +563,20 @@ function PinDialog({ opened, onClose, onConfirm }) {
           <Button 
             onClick={handleConfirm}
             disabled={pin.length === 0}
-            style={{
-              backgroundColor: pin.length > 0 ? '#1a1a1a' : '#e5e5e5',
-              color: pin.length > 0 ? '#ffffff' : '#999999',
-              fontWeight: 400,
-              transition: 'all 0.2s ease',
+            styles={{
+              root: {
+                backgroundColor: confirmBg,
+                color: confirmColor,
+                fontWeight: 400,
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  backgroundColor: confirmBg,
+                },
+                '&:disabled': {
+                  backgroundColor: isDark ? '#2c2c2c' : '#e5e5e5',
+                  color: isDark ? '#666666' : '#999999',
+                }
+              }
             }}
           >
             Confirm
