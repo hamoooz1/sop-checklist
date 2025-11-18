@@ -483,7 +483,14 @@ export async function completeRestockRequest(arg) {
       fulfilled_at: new Date().toISOString(),
     })
     .eq('id', id)
-    .select()
+    .select(`
+      id, company_id, location_id, requested_by, fulfilled_by,
+      status, category, item, item_id, quantity, urgency, notes,
+      created_at, fulfilled_at,
+      requester:requested_by ( id, display_name ),
+      fulfiller:fulfilled_by ( id, display_name ),
+      item:item_id ( id, name, category, image_url, unit, sku )
+    `)
     .single();
 
   if (error) throw error;

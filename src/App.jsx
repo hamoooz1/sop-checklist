@@ -1018,15 +1018,25 @@ function EmployeeView({
   );
 
   const getRestockDisplay = (request) => {
-    const linkedItem =
-      request.item && typeof request.item === "object" && !Array.isArray(request.item)
-        ? request.item
-        : null;
+    // Handle joined item from Supabase (when item_id is set)
+    // Supabase returns it as an object with the item fields
+    let linkedItem = null;
+    if (request.item && typeof request.item === "object" && !Array.isArray(request.item) && request.item.id) {
+      // Valid joined item object
+      linkedItem = request.item;
+    } else if (Array.isArray(request.item) && request.item.length > 0 && request.item[0]?.id) {
+      // Sometimes Supabase wraps single relations in arrays
+      linkedItem = request.item[0];
+    }
+    
+    // Extract name: prefer linked item name, fallback to legacy text field, then default
     const name =
-      linkedItem?.name ??
-      (typeof request.item === "string" ? request.item : request.item ?? "Item");
-    const categoryLabel = linkedItem?.category ?? request.category ?? "Other";
-    const image = linkedItem?.image_url ?? null;
+      (linkedItem?.name && linkedItem.name.trim()) ||
+      (typeof request.item === "string" && request.item.trim()) ||
+      "Item";
+    
+    const categoryLabel = linkedItem?.category || request.category || "Other";
+    const image = linkedItem?.image_url || null;
     const unitSku =
       linkedItem && (linkedItem.unit || linkedItem.sku)
         ? [linkedItem.unit, linkedItem.sku].filter(Boolean).join(" · ")
