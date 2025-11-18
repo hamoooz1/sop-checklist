@@ -16,6 +16,7 @@ import {
   listTimeBlocks, upsertTimeBlock, removeTimeBlock,
   listTasklistTemplates, upsertTasklistTemplateWithTasks, deleteTasklistTemplate
 } from "./lib/queries.js";
+import ItemsPanel from "./components/admin/ItemsPanel.jsx";
 
 // Custom hook for debounced updates
 function useDebouncedUpdate(updateFn, delay = 500) {
@@ -201,6 +202,7 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
               <NavLink active={view === "company"} label="Company" onClick={() => setView("company")} leftSection={<IconSettings size={16} />} />
               <NavLink active={view === "locations"} label="Locations" onClick={() => setView("locations")} />
               <NavLink active={view === "users"} label="Users & Roles" onClick={() => setView("users")} />
+              <NavLink active={view === "items"} label="Items" onClick={() => setView("items")} />
               <NavLink active={view === "checklists"} label="Checklists & Templates" onClick={() => setView("checklists")} />
               <NavLink active={view === "policies"} label="Evidence & Compliance" onClick={() => setView("policies")} />
               <NavLink active={view === "notifications"} label="Notifications" onClick={() => setView("notifications")} />
@@ -262,6 +264,8 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
                   }}
                 />
               )}
+
+              {view === "items" && <ItemsPanel />}
 
               {view === "users" && (
                 <UsersPane
@@ -360,6 +364,7 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
           <NavLink active={view === "company"} label="Company" onClick={() => { setView("company"); closeNav(); }} leftSection={<IconSettings size={16} />} />
           <NavLink active={view === "locations"} label="Locations" onClick={() => { setView("locations"); closeNav(); }} />
           <NavLink active={view === "users"} label="Users & Roles" onClick={() => { setView("users"); closeNav(); }} />
+          <NavLink active={view === "items"} label="Items" onClick={() => { setView("items"); closeNav(); }} />
           <NavLink active={view === "checklists"} label="Checklists & Templates" onClick={() => { setView("checklists"); closeNav(); }} />
           <NavLink active={view === "policies"} label="Evidence & Compliance" onClick={() => { setView("policies"); closeNav(); }} />
           <NavLink active={view === "notifications"} label="Notifications" onClick={() => { setView("notifications"); closeNav(); }} />
@@ -375,7 +380,6 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
 
 /* ---------- PANES ---------- */
 
-// AdminView.jsx (replace your CompanyPane with this)
 // AdminView.jsx
 function CompanyPane({ companyId, initial, onUpdate }) {
   const [form, setForm] = useState(() => ({

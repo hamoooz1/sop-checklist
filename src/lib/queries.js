@@ -5,10 +5,105 @@ import { getMyCompanyId } from "./company";
 
 // ---------- tiny utils ----------
 const BUCKET = "evidence";
+const ITEM_BUCKET = "items";
+// -----------------------------
+// Storage helpers
+// -----------------------------
+export async function uploadItemImage(file, companyId) {
+  const cid = companyId || (await getMyCompanyId());
+  if (!cid) throw new Error("uploadItemImage: no company id");
+
+  const safe = file.name.replace(/\s+/g, "_");
+  const path = `company/${cid}/${Date.now()}_${safe}`;
+
+  const { error } = await supabase
+    .storage
+    .from(ITEM_BUCKET)
+    .upload(path, file, {
+      upsert: false,
+      contentType: file.type || "application/octet-stream",
+    });
+
+  if (error) throw error;
+
+  const { data: pub } = supabase.storage.from(ITEM_BUCKET).getPublicUrl(path);
+  return pub.publicUrl; // store in item.image_url
+}
 
 // -----------------------------
-// Users (scoped by company_id)
+// Items (generic catalog)
 // -----------------------------
+export async function listItems(companyId) {
+  const cid = companyId || (await getMyCompanyId());
+  if (!cid) return [];
+
+  const { data, error } = await supabase
+    .from("item")
+    .select("*")
+    .eq("company_id", cid)
+    .order("category", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function createItem({
+  name,
+  category,
+  image_url = null,
+  unit = null,
+  sku = null,
+  notes = null,
+  is_active = true,
+  company_id,
+}) {
+  const cid = company_id || (await getMyCompanyId());
+  if (!cid) throw new Error("createItem: missing company_id");
+
+  const payload = {
+    company_id: cid,
+    name,
+    category,
+    image_url,
+    unit,
+    sku,
+    notes,
+    is_active,
+  };
+
+  const { data, error } = await supabase
+    .from("item")
+    .insert(payload)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function updateItem(id, patch) {
+  const { data, error } = await supabase
+    .from("item")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteItem(id) {
+  const { error } = await supabase
+    .from("item")
+    .delete()
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+
 export default async function fetchUsers(companyId) {
   // [COMPANY_SCOPE]
   const cid = companyId || (await getMyCompanyId());
@@ -303,20 +398,24 @@ export async function hydrateAll(companyId) {
 
 // Restock
 export async function listRestockRequests(companyId, { locationId = null, status = null } = {}) {
+  const cid = companyId || (await getMyCompanyId());
+  if (!cid) return [];
+
   let q = supabase
-    .from('restock_request')
+    .from("restock_request")
     .select(`
       id, company_id, location_id, requested_by, fulfilled_by,
-      status, category, item, quantity, urgency, notes,
+      status, category, item, item_id, quantity, urgency, notes,
       created_at, fulfilled_at,
       requester:requested_by ( id, display_name ),
-      fulfiller:fulfilled_by ( id, display_name )
+      fulfiller:fulfilled_by ( id, display_name ),
+      item:item_id ( id, name, category, image_url, unit, sku )
     `)
-    .eq('company_id', companyId)
-    .order('created_at', { ascending: false });
+    .eq("company_id", cid)
+    .order("created_at", { ascending: false });
 
-  if (locationId) q = q.eq('location_id', locationId);
-  if (status) q = q.eq('status', status);
+  if (locationId) q = q.eq("location_id", locationId);
+  if (status) q = q.eq("status", status);
 
   const { data, error } = await q;
   if (error) throw error;
@@ -326,30 +425,42 @@ export async function listRestockRequests(companyId, { locationId = null, status
 export async function createRestockRequest({
   company_id,
   location_id,
-  category,  
-  item,
+  // NEW: structured reference
+  item_id = null,
+  // Legacy / manual:
+  category = null,
+  item = null,
   quantity = 1,
-  urgency = 'Normal',
-  notes = '',
+  urgency = "Normal",
+  notes = "",
   requested_by: requestedByOverride = null,
 }) {
+  const cid = company_id || (await getMyCompanyId());
+  if (!cid) throw new Error("createRestockRequest: missing company_id");
+
   const { data: { user } } = await supabase.auth.getUser();
   const requested_by = requestedByOverride ?? (user?.id ?? null);
 
   const payload = {
-    company_id,
+    company_id: cid,
     location_id,
     requested_by,
-    category,
-    item,
     quantity,
     urgency,
     notes,
-    status: 'Open'
+    status: "Open",
   };
 
+  if (item_id) {
+    payload.item_id = item_id;
+  } else {
+    // Fallback if you still want ad-hoc requests
+    payload.category = category;
+    payload.item = item;
+  }
+
   const { data, error } = await supabase
-    .from('restock_request')
+    .from("restock_request")
     .insert(payload)
     .select()
     .single();

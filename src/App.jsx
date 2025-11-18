@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback, Suspense, lazy } from "react";
 const AdminView = lazy(() => import("./AdminView"));
-import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea, Popover, Skeleton, useMantineColorScheme, useComputedColorScheme } from "@mantine/core";
+import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea, Popover, Skeleton, useMantineColorScheme, useComputedColorScheme, Avatar } from "@mantine/core";
 
 import { supabase } from "./lib/supabase.js";
 import {
@@ -23,8 +23,9 @@ import {
   IconChevronDown, IconChevronRight, IconListCheck, IconShoppingCart
 } from "@tabler/icons-react";
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
-import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates, listRestockRequests, createRestockRequest, completeRestockRequest } from "./lib/queries.js";
+import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates, listRestockRequests, completeRestockRequest } from "./lib/queries.js";
 import BugReport from "./components/BugReport.jsx";
+import RestockRequestForm from "./components/restock/RestockRequestForm.jsx";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -959,11 +960,16 @@ function EmployeeView({
   const [groupBy, setGroupBy] = React.useState('timeblock'); // 'timeblock', 'category', 'priority', 'status'
   const [sortBy, setSortBy] = React.useState('priority'); // 'priority', 'alphabetical', 'completion'
 
-  // Restock state
-  const [restock, setRestock] = React.useState({ category: 'Food', item: '', quantity: 1, urgency: 'normal', notes: '', requestedBy: currentEmployee || '' });
   const [restockList, setRestockList] = React.useState([]);
   const [loadingRestock, setLoadingRestock] = React.useState(false);
   const restockLocationId = tasklists[0]?.locationId || null;
+
+  const applyRestockRows = React.useCallback((rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    setRestockList(list);
+    const count = list.filter(r => String(r.status).toLowerCase() !== 'completed').length;
+    onRestockOpenCountChange?.(count);
+  }, [onRestockOpenCountChange]);
 
   // Load restock data on app start and when dependencies change
   useEffect(() => {
@@ -974,31 +980,59 @@ function EmployeeView({
         setLoadingRestock(true);
         const rows = await listRestockRequests(company.id, { locationId: restockLocationId, status: null });
         if (!cancelled) {
-          setRestockList(rows);
-          const count = (rows || []).filter(r => String(r.status).toLowerCase() !== 'completed').length;
-          onRestockOpenCountChange?.(count);
+          applyRestockRows(rows);
         }
       } finally {
         if (!cancelled) setLoadingRestock(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [company?.id, restockLocationId]);
+  }, [company?.id, restockLocationId, applyRestockRows]);
 
   // Debounced restock refresh to prevent rapid-fire updates
   const debouncedRefreshRestock = useCallback(
     debounce(async () => {
+      if (!company?.id) return;
       try {
         const rows = await listRestockRequests(company.id, { locationId: restockLocationId, status: null });
-        setRestockList(rows);
-        const count = (rows || []).filter(r => String(r.status).toLowerCase() !== 'completed').length;
-        onRestockOpenCountChange?.(count);
+        applyRestockRows(rows);
       } catch (e) {
         console.error('Failed to refresh restock list:', e);
       }
     }, 300),
-    [company?.id, restockLocationId, onRestockOpenCountChange]
+    [company?.id, restockLocationId, applyRestockRows]
   );
+
+  const handleRestockSubmitted = useCallback(() => {
+    debouncedRefreshRestock();
+  }, [debouncedRefreshRestock]);
+
+  const openRestockRequests = React.useMemo(
+    () => restockList.filter((r) => String(r.status).toLowerCase() !== "completed"),
+    [restockList]
+  );
+
+  const completedRestockRequests = React.useMemo(
+    () => restockList.filter((r) => String(r.status).toLowerCase() === "completed"),
+    [restockList]
+  );
+
+  const getRestockDisplay = (request) => {
+    const linkedItem =
+      request.item && typeof request.item === "object" && !Array.isArray(request.item)
+        ? request.item
+        : null;
+    const name =
+      linkedItem?.name ??
+      (typeof request.item === "string" ? request.item : request.item ?? "Item");
+    const categoryLabel = linkedItem?.category ?? request.category ?? "Other";
+    const image = linkedItem?.image_url ?? null;
+    const unitSku =
+      linkedItem && (linkedItem.unit || linkedItem.sku)
+        ? [linkedItem.unit, linkedItem.sku].filter(Boolean).join(" · ")
+        : null;
+    return { linkedItem, name, categoryLabel, image, unitSku };
+  };
 
   // Set up real-time subscription for restock requests
   useEffect(() => {
@@ -1293,159 +1327,123 @@ function EmployeeView({
       ))}
 
       {tab === 'restock' && (
-        <Card withBorder radius="lg" shadow="sm">
-          <Text fw={600} mb="xs">Request restock</Text>
-          {loadingRestock ? (
-            <Stack gap="sm">
-              <Skeleton height={40} width="100%" />
-              <Skeleton height={40} width="100%" />
-              <Skeleton height={40} width="100%" />
-              <Skeleton height={80} width="100%" />
-              <Skeleton height={36} width={120} />
-            </Stack>
-          ) : (
-            <>
-              <Grid gutter="sm">
-            <Grid.Col span={{ base: 12, sm: 4 }}>
-              <Select
-                label="Category"
-                value={restock.category}
-                onChange={(v) => setRestock((r) => ({ ...r, category: v || 'Food' }))}
-                data={[{ value: 'Food', label: 'Food' }, { value: 'Drinks', label: 'Drinks' }, { value: 'Supplies', label: 'Supplies' }]}
-                comboboxProps={{ withinPortal: true }}
-              />
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 4 }}>
-              <TextInput label="Item" value={restock.item} onChange={(e) => setRestock((r) => ({ ...r, item: e.target.value }))} />
-            </Grid.Col>
-            <Grid.Col span={{ base: 6, sm: 2 }}>
-              <NumberInput label="Qty" min={1} value={restock.quantity} onChange={(v) => setRestock((r) => ({ ...r, quantity: Number(v) || 1 }))} />
-            </Grid.Col>
-            <Grid.Col span={{ base: 6, sm: 2 }}>
-              <Select
-                label="Urgency"
-                value={restock.urgency}
-                onChange={(v) => setRestock((r) => ({ ...r, urgency: v || 'normal' }))}
-                data={[{ value: 'Low', label: 'Low' }, { value: 'Normal', label: 'Normal' }, { value: 'High', label: 'High' }]}
-                comboboxProps={{ withinPortal: true }}
-              />
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 4 }}>
-              <Select
-                label="Requested By"
-                value={restock.requestedBy}
-                onChange={(v) => setRestock((r) => ({ ...r, requestedBy: v || '' }))}
-                data={(employees || []).map(u => ({ value: String(u.id), label: u.display_name }))}
-                searchable
-                comboboxProps={{ withinPortal: true }}
-              />
-            </Grid.Col>
-            <Grid.Col span={{ base: 12 }}>
-              <Textarea label="Notes" minRows={2} value={restock.notes} onChange={(e) => setRestock((r) => ({ ...r, notes: e.target.value }))} />
-            </Grid.Col>
-          </Grid>
-          <Group justify="flex-end" mt="sm">
-            <Button
-              onClick={async () => {
-                if (!restock.item.trim()) { alert('Enter an item'); return; }
-                try {
-                  const row = await createRestockRequest({
-                    company_id: company.id,
-                    location_id: restockLocationId,
-                    category: restock.category,
-                    item: restock.item.trim(),
-                    quantity: restock.quantity,
-                    urgency: restock.urgency,
-                    notes: restock.notes.trim(),
-                    requested_by: restock.requestedBy || null,
-                  });
-                  setRestockList((prev) => [row, ...prev]);
-                  // Immediately update the count locally for better responsiveness
-                  const newCount = restockList.filter(r => String(r.status).toLowerCase() !== 'completed').length + 1;
-                  onRestockOpenCountChange?.(newCount);
-                  setRestock({ category: 'Food', item: '', quantity: 1, urgency: 'normal', notes: '', requestedBy: currentEmployee || '' });
-                } catch (e) {
-                  console.error(e);
-                  alert('Failed to create request');
-                }
-              }}
-            >
-              Submit Request
-            </Button>
-          </Group>
+        <Stack gap="md">
+          <RestockRequestForm
+            companyId={company?.id}
+            locationId={restockLocationId}
+            currentEmployeeId={currentEmployee}
+            onSubmitted={handleRestockSubmitted}
+          />
 
-          <Divider my="sm" />
-          <Text fw={600} mb="xs">Open requests</Text>
-          {loadingRestock ? (
-            <Text c="dimmed">Loading…</Text>
-          ) : (
-            <Stack gap="xs">
-              {restockList.filter(r => String(r.status).toLowerCase() !== 'completed').map((r) => (
-                <Card key={r.id} withBorder radius="md">
-                  <Stack gap="xs">
-                    <Group justify="space-between" wrap="wrap">
-                      <div>
-                        <Text fw={600}>{r.item} <Text span c="dimmed">• {r.category}</Text></Text>
-                        <Text c="dimmed" fz="sm">Qty: {r.quantity} • Urgency: {r.urgency}</Text>
-                        {r.notes && <Text c="dimmed" fz="sm">{r.notes}</Text>}
-                      </div>
-                      <Group gap="xs" wrap="wrap">
-                        <Select
-                          placeholder="Fulfilled by"
-                          value={r.fulfilled_by || ''}
-                          onChange={(v) => setRestockList(prev => prev.map(x => x.id === r.id ? { ...x, fulfilled_by: v || null } : x))}
-                          data={(employees || []).map(u => ({ value: String(u.id), label: u.display_name }))}
-                          searchable
-                          comboboxProps={{ withinPortal: true }}
-                          w={220}
-                        />
-                        <Button variant="default" onClick={async () => {
-                          try {
-                            const updated = await completeRestockRequest({ id: r.id, fulfilled_by: r.fulfilled_by || null });
-                            setRestockList(prev => prev.map(x => x.id === r.id ? updated : x));
-                            // Immediately update the count locally for better responsiveness
-                            const newCount = Math.max(0, restockList.filter(x => x.id !== r.id && String(x.status).toLowerCase() !== 'completed').length);
-                            onRestockOpenCountChange?.(newCount);
-                          } catch (e) {
-                            console.error(e);
-                            alert('Failed to complete');
-                          }
-                        }}>Mark Completed</Button>
+          <Card withBorder radius="lg" shadow="sm">
+            <Text fw={600} mb="xs">Open requests</Text>
+            {loadingRestock ? (
+              <Stack gap="sm">
+                <Skeleton height={40} width="100%" />
+                <Skeleton height={80} width="100%" />
+                <Skeleton height={80} width="100%" />
+              </Stack>
+            ) : (
+              <Stack gap="xs">
+                {openRestockRequests.map((r) => {
+                  const display = getRestockDisplay(r);
+                  return (
+                    <Card key={r.id} withBorder radius="md">
+                      <Group justify="space-between" align="flex-start" wrap="wrap">
+                        <Group gap="sm" align="flex-start">
+                          <Avatar
+                            src={display.image || undefined}
+                            radius="md"
+                            size={48}
+                          >
+                            {display.name?.[0] ?? "?"}
+                          </Avatar>
+                          <div>
+                            <Text fw={600}>{display.name}</Text>
+                            <Text c="dimmed" size="sm">{display.categoryLabel}</Text>
+                            {display.unitSku && (
+                              <Text c="dimmed" size="xs">{display.unitSku}</Text>
+                            )}
+                            <Text c="dimmed" size="sm">
+                              Qty: {r.quantity} • Urgency: {r.urgency}
+                            </Text>
+                            {r.notes && <Text c="dimmed" size="sm">{r.notes}</Text>}
+                          </div>
+                        </Group>
+                        <Stack gap="xs" style={{ minWidth: 220, flex: "0 0 220px" }}>
+                          <Select
+                            placeholder="Fulfilled by"
+                            value={r.fulfilled_by || ''}
+                            onChange={(v) => setRestockList(prev => prev.map(x => x.id === r.id ? { ...x, fulfilled_by: v || null } : x))}
+                            data={(employees || []).map(u => ({ value: String(u.id), label: u.display_name }))}
+                            searchable
+                            comboboxProps={{ withinPortal: true }}
+                          />
+                          <Button variant="default" onClick={async () => {
+                            try {
+                              const updated = await completeRestockRequest({ id: r.id, fulfilled_by: r.fulfilled_by || null });
+                              setRestockList(prev => prev.map(x => x.id === r.id ? updated : x));
+                              const newCount = Math.max(0, openRestockRequests.filter((x) => x.id !== r.id).length);
+                              onRestockOpenCountChange?.(newCount);
+                            } catch (e) {
+                              console.error(e);
+                              alert('Failed to complete');
+                            }
+                          }}>
+                            Mark Completed
+                          </Button>
+                        </Stack>
                       </Group>
+                    </Card>
+                  );
+                })}
+                {openRestockRequests.length === 0 && (
+                  <Text c="dimmed">No open requests.</Text>
+                )}
+              </Stack>
+            )}
+
+            <Divider my="sm" />
+            <Text fw={600} mb="xs">Completed</Text>
+            <Stack gap="xs">
+              {completedRestockRequests.map((r) => {
+                const display = getRestockDisplay(r);
+                return (
+                  <Card key={r.id} withBorder radius="md">
+                    <Group justify="space-between" align="flex-start" wrap="wrap">
+                      <Group gap="sm" align="flex-start">
+                        <Avatar
+                          src={display.image || undefined}
+                          radius="md"
+                          size={48}
+                        >
+                          {display.name?.[0] ?? "?"}
+                        </Avatar>
+                        <div>
+                          <Text fw={600}>{display.name}</Text>
+                          <Text c="dimmed" size="sm">{display.categoryLabel}</Text>
+                          {display.unitSku && (
+                            <Text c="dimmed" size="xs">{display.unitSku}</Text>
+                          )}
+                          <Text c="dimmed" size="sm">
+                            Qty: {r.quantity} • Urgency: {r.urgency}
+                          </Text>
+                          {r.notes && <Text c="dimmed" size="sm">{r.notes}</Text>}
+                        </div>
+                      </Group>
+                      <Text c="dimmed" size="sm">
+                        Fulfilled by: {(employees || []).find(u => String(u.id) === String(r.fulfilled_by))?.display_name || r.fulfilled_by || '—'}
+                      </Text>
                     </Group>
-                  </Stack>
-                </Card>
-              ))}
-              {restockList.filter(r => String(r.status).toLowerCase() !== 'completed').length === 0 && (
-                <Text c="dimmed">No open requests.</Text>
+                  </Card>
+                );
+              })}
+              {completedRestockRequests.length === 0 && (
+                <Text c="dimmed">No completed requests yet.</Text>
               )}
             </Stack>
-          )}
-
-          <Divider my="sm" />
-          <Text fw={600} mb="xs">Completed</Text>
-          <Stack gap="xs">
-            {restockList.filter(r => String(r.status).toLowerCase() === 'completed').map((r) => (
-              <Card key={r.id} withBorder radius="md">
-                <Group justify="space-between" wrap="wrap">
-                  <div>
-                    <Text fw={600}>{r.item} <Text span c="dimmed">• {r.category}</Text></Text>
-                    <Text c="dimmed" fz="sm">Qty: {r.quantity} • Urgency: {r.urgency}</Text>
-                    {r.notes && <Text c="dimmed" fz="sm">{r.notes}</Text>}
-                  </div>
-                  <Text c="dimmed" fz="sm">
-                    Fulfilled by: {(employees || []).find(u => String(u.id) === String(r.fulfilled_by))?.display_name || r.fulfilled_by || '—'}
-                  </Text>
-                </Group>
-              </Card>
-            ))}
-            {restockList.filter(r => String(r.status).toLowerCase() === 'completed').length === 0 && (
-              <Text c="dimmed">No completed requests yet.</Text>
-            )}
-          </Stack>
-            </>
-          )}
-        </Card>
+          </Card>
+        </Stack>
       )}
 
       <Card withBorder radius="md" style={{ position: "sticky", zIndex: 1, top: 90 }}>
