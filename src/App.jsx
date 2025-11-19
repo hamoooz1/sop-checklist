@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback, Suspense, lazy } from "react";
 const AdminView = lazy(() => import("./AdminView"));
-import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea, Popover, Skeleton, useMantineColorScheme, useComputedColorScheme, Avatar } from "@mantine/core";
+import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea, Popover, Skeleton, useMantineColorScheme, useComputedColorScheme, Avatar, Paper, Box } from "@mantine/core";
 
 import { supabase } from "./lib/supabase.js";
 import {
@@ -609,7 +609,7 @@ function EvidenceRow({ state }) {
 }
 
 /** ---------------------- Task Grouping Components ---------------------- */
-function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, updateTaskState, handleComplete, handleUpload, getTimeBlockLabel, signoff, groupBy }) {
+function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, updateTaskState, handleComplete, handleUpload, getTimeBlockLabel, signoff, groupBy, selectedTasks, onSelectChange, onSelectAll }) {
   const [isExpanded, setIsExpanded] = React.useState(true);
   const { colorScheme } = useMantineColorScheme();
   const computed = useComputedColorScheme('light');
@@ -628,6 +628,12 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
     const state = states.find((s) => s.taskId === task.id);
     return (state?.status === "Complete" || state?.na) && canTaskBeCompleted(task, state);
   });
+  
+  // Check selection state for this group
+  const selectedSet = selectedTasks?.get(tasklist.id) || new Set();
+  const selectedCount = tasks.filter(t => selectedSet.has(t.id)).length;
+  const allSelected = tasks.length > 0 && selectedCount === tasks.length;
+  const someSelected = selectedCount > 0 && selectedCount < tasks.length;
   
   return (
     <Card withBorder radius="lg" shadow="sm" style={{ marginBottom: '1rem' }}>
@@ -652,6 +658,7 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
               <Text fw={600} size="md" c={isDark ? "white" : "dark"}>{title}</Text>
               <Text c={isDark ? "gray.3" : "dimmed"} size="sm">
                 {getTimeBlockLabel && getTimeBlockLabel(tasklist.timeBlockId)}
+                {onSelectAll && selectedCount > 0 && ` • ${selectedCount} selected`}
               </Text>
             </div>
           </Group>
@@ -705,25 +712,30 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
       <Collapse in={isExpanded}>
         <Card.Section inheritPadding py="md">
           <Stack gap="sm">
-            {tasks.map((task) => {
+            {tasks.map((task, index) => {
               const state = states.find((s) => s.taskId === task.id);
               const isComplete = state?.status === "Complete";
               const canComplete = canTaskBeCompleted(task, state);
               const opened = isTaskOpen(tasklist.id, task.id);
+              const isSelected = selectedSet.has(task.id);
               
               return (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  state={state}
-                  isComplete={isComplete}
-                  canComplete={canComplete}
-                  opened={opened}
-                  onToggle={() => onToggleTask(tasklist.id, task.id)}
-                  onUpdate={(patch) => updateTaskState(tasklist.id, task.id, patch)}
-                  onComplete={() => handleComplete(tasklist, task)}
-                  onUpload={(file) => handleUpload(tasklist, task, file)}
-                />
+                <div key={task.id} style={{ marginTop: index === 0 ? '1rem' : 0 }}>
+                  <TaskCard
+                    task={task}
+                    state={state}
+                    isComplete={isComplete}
+                    canComplete={canComplete}
+                    opened={opened}
+                    onToggle={() => onToggleTask(tasklist.id, task.id)}
+                    onUpdate={(patch) => updateTaskState(tasklist.id, task.id, patch)}
+                    onComplete={() => handleComplete(tasklist, task)}
+                    onUpload={(file) => handleUpload(tasklist, task, file)}
+                    isSelected={isSelected}
+                    onSelectChange={onSelectChange}
+                    tasklist={tasklist}
+                  />
+                </div>
               );
             })}
           </Stack>
@@ -733,7 +745,44 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
   );
 }
 
-function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUpdate, onComplete, onUpload }) {
+function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUpdate, onComplete, onUpload, isSelected, onSelectChange, tasklist }) {
+  const { colorScheme } = useMantineColorScheme();
+  const computed = useComputedColorScheme('light');
+  const isDark = computed === 'dark';
+  
+  // Local state for note input for better responsiveness
+  const [localNote, setLocalNote] = React.useState(state?.note ?? "");
+  const noteUpdateTimeoutRef = React.useRef(null);
+  
+  // Sync local note with prop state when it changes externally
+  React.useEffect(() => {
+    setLocalNote(state?.note ?? "");
+  }, [state?.note]);
+  
+  // Handle note input with debounced update
+  const handleNoteChange = (value) => {
+    setLocalNote(value); // Update local state immediately for responsiveness
+    
+    // Clear existing timeout
+    if (noteUpdateTimeoutRef.current) {
+      clearTimeout(noteUpdateTimeoutRef.current);
+    }
+    
+    // Debounce the parent state update
+    noteUpdateTimeoutRef.current = setTimeout(() => {
+      onUpdate({ note: value });
+    }, 150); // 150ms debounce for smooth typing
+  };
+  
+  // Cleanup timeout on unmount
+  React.useEffect(() => {
+    return () => {
+      if (noteUpdateTimeoutRef.current) {
+        clearTimeout(noteUpdateTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const getPriorityColor = (priority) => {
     switch (priority) {
       case 1: return 'red';
@@ -754,132 +803,220 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
     }
   };
 
+  const getStatusLabel = () => {
+    if (isComplete) return 'Completed';
+    if (state?.na) return 'N/A';
+    return 'Pending';
+  };
+
+  // Theme-aware border colors
+  const borderColor = isComplete 
+    ? "var(--mantine-color-green-6)" 
+    : isSelected 
+    ? "var(--mantine-color-blue-6)" 
+    : isDark 
+    ? "var(--mantine-color-dark-4)" 
+    : "var(--mantine-color-gray-4)";
+  
+  const leftBorderColor = isComplete 
+    ? "var(--mantine-color-green-6)" 
+    : isSelected 
+    ? "var(--mantine-color-blue-6)" 
+    : getPriorityColor(task.priority) === 'red' 
+    ? "var(--mantine-color-red-6)" 
+    : getPriorityColor(task.priority) === 'orange' 
+    ? "var(--mantine-color-orange-6)" 
+    : isDark
+    ? "var(--mantine-color-dark-4)"
+    : "var(--mantine-color-gray-4)";
+  const borderWidth = isSelected ? 2 : 1;
+
   return (
-    <Card
-      withBorder
+    <Paper
       radius="md"
+      p="md"
       style={{
-        borderColor: isComplete ? "var(--mantine-color-green-6)" : "var(--mantine-color-gray-4)",
+        borderLeft: `4px solid ${leftBorderColor}`,
+        borderTop: `${borderWidth}px solid ${borderColor}`,
+        borderRight: `${borderWidth}px solid ${borderColor}`,
+        borderBottom: `${borderWidth}px solid ${borderColor}`,
         background: isComplete 
           ? "color-mix(in oklab, var(--mantine-color-green-6) 8%, var(--mantine-color-body))" 
+          : isSelected
+          ? "color-mix(in oklab, var(--mantine-color-blue-6) 5%, var(--mantine-color-body))"
           : "var(--mantine-color-body)",
         transition: 'all 0.2s ease',
+        marginBottom: '0.75rem',
+        cursor: 'pointer',
       }}
+      onClick={() => !opened && onToggle()}
     >
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
-          <ActionIcon 
-            variant="subtle" 
-            onClick={onToggle} 
-            aria-label="Toggle details"
-            style={{ flexShrink: 0 }}
+      <Group gap="md" align="center" wrap="nowrap">
+        {/* Checkbox for selection - centered vertically */}
+        {onSelectChange && (
+          <Box
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              height: '100%',
+              minHeight: '40px'
+            }}
+            onClick={(e) => e.stopPropagation()}
           >
-            {opened ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
-          </ActionIcon>
-          
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <Group gap={6} wrap="wrap" align="center">
-              <Text fw={600} c={isComplete ? "green.9" : undefined} style={{ wordBreak: 'break-word', lineHeight: 1.3 }}>
-                {task.title}
-              </Text>
-              
-              <Badge
-                size="xs"
-                color={getPriorityColor(task.priority)}
-                variant="light"
+            <input
+              type="checkbox"
+              checked={isSelected || false}
+              onChange={(e) => onSelectChange(tasklist.id, task.id, e.currentTarget.checked)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ 
+                width: '20px', 
+                height: '20px', 
+                cursor: 'pointer',
+                accentColor: 'var(--mantine-color-blue-6)',
+                margin: 0
+              }}
+              aria-label={`Select task: ${task.title}`}
+            />
+          </Box>
+        )}
+        
+        {/* Main content area */}
+        <Stack gap="sm" style={{ flex: 1, minWidth: 0 }}>
+          {/* Title row */}
+          <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
+            <Group align="flex-start" gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+              <ActionIcon 
+                variant="subtle" 
+                onClick={(e) => { e.stopPropagation(); onToggle(); }}
+                aria-label="Toggle details"
+                size="sm"
+                style={{ flexShrink: 0 }}
               >
-                {getPriorityLabel(task.priority)}
-              </Badge>
+                {opened ? <IconChevronDown size={18} /> : <IconChevronRight size={18} />}
+              </ActionIcon>
               
+              <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
+                <Text 
+                  fw={800} 
+                  fz="lg" 
+                  c={isComplete ? "green.7" : undefined} 
+                  style={{ wordBreak: 'break-word', lineHeight: 1.2 }}
+                >
+                  {task.title}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  {task.inputType === "number" ? "Numeric Entry" : task.inputType === "text" ? "Text Response" : "Checklist"} • {tasklist?.name || "Task"}
+                </Text>
+              </Stack>
+            </Group>
+
+            <Group gap="xs" wrap="wrap" align="center" style={{ flexShrink: 0 }}>
+              <Badge
+                size="sm"
+                variant={isComplete ? "filled" : "light"}
+                color={isComplete ? "green" : state?.na ? "gray" : "blue"}
+              >
+                {getStatusLabel()}
+              </Badge>
               {task.category && (
-                <Badge size="xs" variant="outline" color="gray">
+                <Badge size="sm" variant="dot" color="gray">
                   {task.category}
                 </Badge>
               )}
-              
-              {state?.reviewStatus && (
-                <Badge
-                  variant="outline"
-                  color={state.reviewStatus === "Approved" ? "green" : state.reviewStatus === "Rework" ? "yellow" : "gray"}
-                  size="xs"
-                >
-                  {state.reviewStatus}
-                </Badge>
-              )}
-              
-              {isComplete && (
-                <Badge color="green" variant="light" leftSection={<IconCheck size={12} />} size="xs">
-                  Completed
-                </Badge>
-              )}
             </Group>
-            
-            <Group gap="xs" mt={4} wrap="wrap">
-              <Text c="dimmed" fz="xs">
-                {task.inputType}
-              </Text>
+          </Group>
+
+          {/* Requirement badges */}
+          {(task.photoRequired || task.noteRequired || (task.inputType === "number" && task.min !== null && task.max !== null)) && (
+            <Group gap={6} wrap="wrap">
               {task.photoRequired && (
-                <Badge size="xs" variant="dot" color="blue">Photo</Badge>
+                <Badge size="xs" variant="dot" color="blue">Photo Required</Badge>
               )}
               {task.noteRequired && (
-                <Badge size="xs" variant="dot" color="orange">Note</Badge>
+                <Badge size="xs" variant="dot" color="orange">Note Required</Badge>
               )}
               {task.inputType === "number" && task.min !== null && task.max !== null && (
                 <Badge size="xs" variant="dot" color="purple">
-                  {task.min}-{task.max}
+                  Range: {task.min}-{task.max}
                 </Badge>
               )}
             </Group>
-          </div>
-        </Group>
-
-        <Group gap="xs" wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }} visibleFrom="sm">
-          {task.inputType === "number" && (
-            <NumberInput
-              placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
-              value={state?.value ?? ""}
-              onChange={(v) => onUpdate({ value: Number(v) })}
-              disabled={isComplete}
-              style={{ width: rem(96) }}
-              size="sm"
-            />
           )}
+          
+          {/* Action row */}
+          <Group justify="space-between" align="center" gap="sm" wrap="wrap">
+            <TextInput
+              placeholder="Add note"
+              value={localNote}
+              onChange={(e) => handleNoteChange(e.target.value)}
+              onBlur={() => {
+                // Ensure final value is synced on blur
+                if (noteUpdateTimeoutRef.current) {
+                  clearTimeout(noteUpdateTimeoutRef.current);
+                }
+                onUpdate({ note: localNote });
+              }}
+              disabled={isComplete && !task.noteRequired}
+              style={{ flex: '1 1 240px', minWidth: rem(160) }}
+              size="sm"
+              radius="md"
+              onClick={(e) => e.stopPropagation()}
+            />
 
-          <TextInput
-            placeholder="Add note"
-            value={state?.note ?? ""}
-            onChange={(e) => onUpdate({ note: e.target.value })}
-            disabled={isComplete && !task.noteRequired}
-            style={{ width: rem(180) }}
-            size="sm"
-          />
+            <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+              {task.inputType === "number" && (
+                <NumberInput
+                  placeholder={`${task.min ?? ""}-${task.max ?? ""}`}
+                  value={state?.value ?? ""}
+                  onChange={(v) => onUpdate({ value: Number(v) })}
+                  disabled={isComplete}
+                  style={{ width: rem(90) }}
+                  size="sm"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              )}
 
-          <FileButton onChange={(file) => file && onUpload(file)} accept="image/*" disabled={isComplete}>
-            {(props) => (
-              <Button variant="default" leftSection={<IconUpload size={14} />} size="sm" {...props}>
-                Photo
+              <FileButton onChange={(file) => file && onUpload(file)} accept="image/*" disabled={isComplete}>
+                {(props) => (
+                  <Button 
+                    variant="subtle" 
+                    leftSection={<IconUpload size={14} />} 
+                    size="sm" 
+                    {...props}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Photo
+                  </Button>
+                )}
+              </FileButton>
+
+              <Button
+                variant={isComplete ? "light" : "gradient"}
+                gradient={isComplete ? undefined : { from: 'blue', to: 'cyan' }}
+                color={isComplete ? "green" : undefined}
+                onClick={(e) => { e.stopPropagation(); onComplete(); }}
+                disabled={!canComplete || isComplete}
+                size="sm"
+                fw={600}
+                style={{ minWidth: rem(110) }}
+                leftSection={isComplete ? <IconCheck size={16} /> : null}
+              >
+                {isComplete ? "Completed" : "Complete Task"}
               </Button>
-            )}
-          </FileButton>
 
-          <Button
-            variant={isComplete ? "outline" : "default"}
-            color={isComplete ? "green" : undefined}
-            onClick={onComplete}
-            disabled={!canComplete || isComplete}
-            size="sm"
-          >
-            {isComplete ? "✓ Done" : "Complete"}
-          </Button>
-
-          <Switch
-            checked={!!state?.na}
-            onChange={(e) => onUpdate({ na: e.currentTarget.checked })}
-            disabled={isComplete}
-            label="N/A"
-            size="sm"
-          />
-        </Group>
+              <Switch
+                checked={!!state?.na}
+                onChange={(e) => onUpdate({ na: e.currentTarget.checked })}
+                disabled={isComplete}
+                label="N/A"
+                size="sm"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </Group>
+          </Group>
+        </Stack>
       </Group>
 
       <Collapse in={opened}>
@@ -887,8 +1024,15 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
         <Stack gap="xs">
           <TextInput
             placeholder="Add note"
-            value={state?.note ?? ""}
-            onChange={(e) => onUpdate({ note: e.target.value })}
+            value={localNote}
+            onChange={(e) => handleNoteChange(e.target.value)}
+            onBlur={() => {
+              // Ensure final value is synced on blur
+              if (noteUpdateTimeoutRef.current) {
+                clearTimeout(noteUpdateTimeoutRef.current);
+              }
+              onUpdate({ note: localNote });
+            }}
             disabled={isComplete && !task.noteRequired}
             style={{ width: "100%" }}
             hiddenFrom="sm"
@@ -933,7 +1077,7 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
           <EvidenceRow state={state} />
         </Stack>
       </Collapse>
-    </Card>
+    </Paper>
   );
 }
 
@@ -953,12 +1097,19 @@ function EmployeeView({
   tab,
   onRestockOpenCountChange,
   employees,
-  currentEmployee
+  currentEmployee,
+  setPinModal
 }) {
   const [openLists, setOpenLists] = React.useState({});
   const [openTasks, setOpenTasks] = React.useState({});
   const [groupBy, setGroupBy] = React.useState('timeblock'); // 'timeblock', 'category', 'priority', 'status'
   const [sortBy, setSortBy] = React.useState('priority'); // 'priority', 'alphabetical', 'completion'
+  
+  // Task selection state: Map of tasklistId -> Set of taskIds
+  const [selectedTasks, setSelectedTasks] = React.useState(new Map());
+  
+  // Modal state for bulk complete errors
+  const [bulkErrorModal, setBulkErrorModal] = React.useState({ opened: false, errors: [] });
 
   const [restockList, setRestockList] = React.useState([]);
   const [loadingRestock, setLoadingRestock] = React.useState(false);
@@ -1069,6 +1220,279 @@ function EmployeeView({
       const k = `${tlId}:${taskId}`;
       return { ...prev, [k]: !prev[k] };
     });
+
+  // Task selection handlers
+  const handleTaskSelect = (tasklistId, taskId, checked) => {
+    setSelectedTasks((prev) => {
+      const next = new Map(prev);
+      if (!next.has(tasklistId)) {
+        next.set(tasklistId, new Set());
+      }
+      const taskSet = next.get(tasklistId);
+      if (checked) {
+        taskSet.add(taskId);
+      } else {
+        taskSet.delete(taskId);
+        if (taskSet.size === 0) {
+          next.delete(tasklistId);
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = (tasklistId, taskIds, checked) => {
+    setSelectedTasks((prev) => {
+      const next = new Map(prev);
+      if (checked) {
+        next.set(tasklistId, new Set(taskIds));
+      } else {
+        next.delete(tasklistId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllToday = () => {
+    const allSelected = tasklists.every((tl) => {
+      const selectedSet = selectedTasks.get(tl.id);
+      return selectedSet && selectedSet.size === tl.tasks.length;
+    });
+    
+    setSelectedTasks((prev) => {
+      const next = new Map();
+      if (!allSelected) {
+        // Select all
+        tasklists.forEach((tl) => {
+          next.set(tl.id, new Set(tl.tasks.map((t) => t.id)));
+        });
+      }
+      // If all selected, clear (return empty map)
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedTasks(new Map());
+  };
+
+  // Get all selected tasks across all tasklists
+  const getAllSelectedTasks = () => {
+    const selected = [];
+    selectedTasks.forEach((taskSet, tasklistId) => {
+      const tasklist = tasklists.find((tl) => tl.id === tasklistId);
+      if (tasklist) {
+        taskSet.forEach((taskId) => {
+          const task = tasklist.tasks.find((t) => t.id === taskId);
+          if (task) {
+            selected.push({ tasklist, task });
+          }
+        });
+      }
+    });
+    return selected;
+  };
+
+  const selectedCount = Array.from(selectedTasks.values()).reduce((sum, set) => sum + set.size, 0);
+
+  // Bulk complete handler with validation
+  const handleBulkComplete = () => {
+    const selected = getAllSelectedTasks();
+    if (selected.length === 0) return;
+
+    // Validate all selected tasks
+    const invalidTasks = [];
+    const validTasks = [];
+
+    selected.forEach(({ tasklist, task }) => {
+      const state = working?.[tasklist.id]?.find((s) => s.taskId === task.id) ?? {};
+      const isValid = canTaskBeCompleted(task, state);
+      
+      if (!isValid) {
+        const missing = [];
+        if (task.photoRequired && (!state.photos || state.photos.length === 0)) {
+          missing.push('Photo');
+        }
+        if (task.noteRequired && (!state.note || state.note.trim() === "")) {
+          missing.push('Note');
+        }
+        if (task.inputType === "number") {
+          const v = state.value;
+          const isNum = typeof v === "number" && !Number.isNaN(v);
+          if (!isNum) {
+            missing.push('Number value');
+          } else {
+            if (typeof task.min === "number" && v < task.min) {
+              missing.push(`Value must be >= ${task.min}`);
+            }
+            if (typeof task.max === "number" && v > task.max) {
+              missing.push(`Value must be <= ${task.max}`);
+            }
+          }
+        }
+        invalidTasks.push({ tasklist, task, missing });
+      } else {
+        validTasks.push({ tasklist, task, state });
+      }
+    });
+
+    // Show error modal if there are invalid tasks
+    if (invalidTasks.length > 0) {
+      setBulkErrorModal({
+        opened: true,
+        errors: invalidTasks.map(({ tasklist, task, missing }) => ({
+          taskTitle: task.title,
+          tasklistName: tasklist.name,
+          missing: missing
+        }))
+      });
+      return;
+    }
+
+    // If all tasks are valid, proceed with bulk completion using single PIN
+    if (validTasks.length === 0) return;
+
+    // Open PIN modal for bulk completion
+    setPinModal({
+      open: true,
+      onConfirm: async (pin) => {
+        try {
+          // 1) Validate PIN *per company* once for all tasks
+          const user = await validatePin({ supabase, companyId: company.id, pin });
+          if (!user) { 
+            alert('Wrong PIN. Please try again.'); 
+            return; 
+          }
+
+          const dateISO = todayISOInTz(company.timezone || 'UTC');
+          
+          // 2) Group tasks by tasklist to batch submission creation
+          const tasksByTasklist = new Map();
+          validTasks.forEach(({ tasklist, task, state }) => {
+            if (!tasksByTasklist.has(tasklist.id)) {
+              tasksByTasklist.set(tasklist.id, { tasklist, tasks: [] });
+            }
+            tasksByTasklist.get(tasklist.id).tasks.push({ task, state });
+          });
+
+          // 3) Process all tasks in parallel
+          const completionPromises = [];
+          
+          for (const { tasklist, tasks } of tasksByTasklist.values()) {
+            // Find/create submission for this tasklist
+            const submissionId = await findOrCreateSubmission({
+              supabase,
+              companyId: company.id,
+              tasklistId: tasklist.id,
+              locationId: tasklist.locationId,
+              dateISO,
+            });
+
+            // Update parent submission with submitted_by
+            await supabase.from('submission')
+              .update({ submitted_by: user.id })
+              .eq('id', submissionId)
+              .eq('company_id', company.id);
+
+            // Complete all tasks in this tasklist
+            for (const { task, state } of tasks) {
+              const valueText =
+                task.inputType === 'number' ? String(state.value ?? '')
+                  : task.inputType === 'text' ? String(state.note ?? '')
+                    : 'true';
+
+              completionPromises.push(
+                upsertSubmissionTask({
+                  supabase,
+                  submissionId,
+                  taskId: task.id,
+                  payload: {
+                    status: 'Complete',
+                    review_status: 'Pending',
+                    na: !!state.na,
+                    value: valueText || null,
+                    note: state.note ?? null,
+                    photos: Array.isArray(state.photos) ? state.photos : [],
+                    submitted_by: user.id,  // All tasks completed by the same PIN user
+                  },
+                })
+              );
+            }
+          }
+
+          // Wait for all completions
+          await Promise.all(completionPromises);
+
+          // 4) Refresh working state for all affected tasklists
+          const refreshPromises = [];
+          for (const { tasklist } of tasksByTasklist.values()) {
+            refreshPromises.push(
+              fetchSubmissionAndTasks({
+                supabase,
+                companyId: company.id,
+                tasklistId: tasklist.id,
+                locationId: tasklist.locationId,
+                dateISO
+              }).then(({ tasks }) => {
+                const byId = new Map(tasks.map(r => [r.task_id, r]));
+                return { tasklist, byId };
+              })
+            );
+          }
+
+          const refreshResults = await Promise.all(refreshPromises);
+          
+          // Update working state with refreshed data
+          setWorking(prev => {
+            const next = { ...prev };
+            refreshResults.forEach(({ tasklist, byId }) => {
+              next[tasklist.id] = tasklist.tasks.map(t => {
+                const row = byId.get(t.id);
+                return row ? {
+                  taskId: t.id,
+                  status: row.status,
+                  reviewStatus: row.review_status,
+                  na: !!row.na,
+                  value: t.inputType === 'number'
+                    ? (row.value !== null && row.value !== '' ? Number(row.value) : null)
+                    : t.inputType === 'text'
+                      ? (row.value ?? '')
+                      : row.value,
+                  note: row.note ?? '',
+                  photos: Array.isArray(row.photos) ? row.photos : [],
+                } : (prev[tasklist.id]?.find(x => x.taskId === t.id) ?? {
+                  taskId: t.id, status: 'Incomplete', reviewStatus: 'Pending', na: false, value: null, note: '', photos: []
+                });
+              });
+            });
+            return next;
+          });
+
+          // Optimistically update UI for all completed tasks
+          setWorking(prev => {
+            const next = { ...prev };
+            validTasks.forEach(({ tasklist, task }) => {
+              if (!next[tasklist.id]) next[tasklist.id] = [];
+              next[tasklist.id] = (next[tasklist.id] ?? []).map(ti =>
+                ti.taskId === task.id ? { ...ti, status: 'Complete', reviewStatus: 'Pending' } : ti
+              );
+            });
+            return next;
+          });
+
+          // Clear selection and close modal
+          clearSelection();
+          setPinModal({ open: false, onConfirm: null });
+          
+          alert(`✓ Successfully completed ${validTasks.length} task${validTasks.length > 1 ? 's' : ''}!`);
+        } catch (e) {
+          console.error(e);
+          alert(e.message || 'Failed to complete tasks. Please try again.');
+          // Don't close modal on error - let user try again
+        }
+      },
+    });
+  };
 
   // Group and sort tasks based on selected options
   const groupedTasklists = React.useMemo(() => {
@@ -1233,6 +1657,96 @@ function EmployeeView({
         </Card>
       )}
 
+      {/* Selection Toolbar - appears when tasks are selected, below progress dashboard */}
+      {selectedCount > 0 && (
+        <Card 
+          withBorder 
+          radius="md" 
+          p="md"
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
+            background: isDark ? 'var(--mantine-color-blue-9)' : 'var(--mantine-color-blue-0)',
+            borderColor: 'var(--mantine-color-blue-6)',
+            boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.1)'
+          }}
+        >
+          <Group justify="space-between" align="center" wrap="wrap">
+            <Group gap="md" align="center">
+              <Text fw={600} size="lg" c={isDark ? "blue.1" : "blue.9"}>
+                {selectedCount} task{selectedCount > 1 ? 's' : ''} selected
+              </Text>
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={clearSelection}
+                c={isDark ? "blue.1" : "blue.9"}
+              >
+                Clear Selection
+              </Button>
+            </Group>
+            <Group gap="sm">
+              <Button
+                variant="filled"
+                color="green"
+                size="md"
+                leftSection={<IconCheck size={18} />}
+                onClick={handleBulkComplete}
+              >
+                Complete Selected
+              </Button>
+            </Group>
+          </Group>
+        </Card>
+      )}
+
+      {/* Bulk Error Modal */}
+      <Modal
+        opened={bulkErrorModal.opened}
+        onClose={() => setBulkErrorModal({ opened: false, errors: [] })}
+        title="Cannot Complete Selected Tasks"
+        size="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="red">
+            {bulkErrorModal.errors.length} task{bulkErrorModal.errors.length > 1 ? 's' : ''} cannot be completed because required fields are missing:
+          </Text>
+          <ScrollArea h={200}>
+            <Stack gap="xs">
+              {bulkErrorModal.errors.map((error, idx) => (
+                <Card 
+                  key={idx} 
+                  withBorder 
+                  p="xs" 
+                  style={{ 
+                    borderColor: isDark ? 'var(--mantine-color-red-6)' : 'var(--mantine-color-red-4)',
+                    background: isDark ? 'var(--mantine-color-dark-6)' : 'var(--mantine-color-red-0)'
+                  }}
+                >
+                  <Text fw={600} size="sm" c={isDark ? "red.3" : "red.9"}>{error.taskTitle}</Text>
+                  <Text size="xs" c={isDark ? "gray.4" : "dimmed"}>{error.tasklistName}</Text>
+                  <Group gap={4} mt={4}>
+                    {error.missing.map((item, i) => (
+                      <Badge key={i} color="red" variant={isDark ? "filled" : "light"} size="xs">
+                        Missing: {item}
+                      </Badge>
+                    ))}
+                  </Group>
+                </Card>
+              ))}
+            </Stack>
+          </ScrollArea>
+          <Text size="xs" c={isDark ? "gray.4" : "dimmed"}>
+            Please fill in the required fields and try again.
+          </Text>
+          <Group justify="flex-end">
+            <Button onClick={() => setBulkErrorModal({ opened: false, errors: [] })}>
+              OK
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       {tab === 'tasks' && (tasklists.length === 0 ? (
         // Skeleton loading for tasklists
@@ -1291,6 +1805,9 @@ function EmployeeView({
                 getTimeBlockLabel={(timeBlockId) => getTimeBlockLabelFromLists(checklists.timeBlocks, timeBlockId)}
                 signoff={signoff}
                 groupBy={groupBy}
+                selectedTasks={selectedTasks}
+                onSelectChange={handleTaskSelect}
+                onSelectAll={handleSelectAll}
               />
             );
           })}
@@ -3678,6 +4195,7 @@ function AppInner() {
                   onRestockOpenCountChange={setRestockOpenCount}
                   employees={employees}
                   currentEmployee={currentEmployee}
+                  setPinModal={setPinModal}
                 />
               )}
               {mode === "manager" && (
