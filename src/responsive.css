@@ -133,6 +133,19 @@ html, body, #root { height: 100%; }
 }
 @media (max-width: 520px) { .r-actions > * { flex: 1 1 auto; } }
 
+/* ---------- Mobile / iPad sticky nav ---------- */
+.employee-subnav {
+  padding-top: var(--safe-top);
+  top: var(--app-shell-header-height, 56px);
+}
+
+@media (pointer: coarse) {
+  .u-btn, .u-btnPrimary {
+    min-height: var(--touch-min);
+    touch-action: manipulation;
+  }
+}
+
 /* ---------- Tables ---------- */
 .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table-scroll table { min-width: 720px; }

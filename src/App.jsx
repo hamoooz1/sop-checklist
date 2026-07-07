@@ -1,7 +1,6 @@
-import React, { useMemo, useState, useEffect, useCallback, Suspense, lazy } from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef, Suspense, lazy } from "react";
 const AdminView = lazy(() => import("./AdminView"));
 import { MantineProvider, createTheme, AppShell, Container, Group, Button, Select, Card, Text, Badge, Table, Grid, Stack, NumberInput, TextInput, Modal, ActionIcon, ScrollArea, FileButton, Switch, SegmentedControl, rem, Tabs, Center, Loader, Drawer, Burger, Divider, Collapse, Textarea, Popover, Skeleton, useMantineColorScheme, useComputedColorScheme, Avatar, Paper, Box } from "@mantine/core";
-
 import { supabase } from "./lib/supabase.js";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -16,7 +15,7 @@ import {
   uploadEvidence,
   toPublicUrl,         // <-- add
 } from './lib/submissions';
-import { useLocalStorage, useDisclosure } from "@mantine/hooks";
+import { useLocalStorage, useDisclosure, useMediaQuery } from "@mantine/hooks";
 import {
   IconSun, IconMoon, IconPhoto, IconCheck, IconUpload, IconMapPin, IconUser,
   IconLayoutGrid, IconLayoutList, IconBug, IconLogout, IconShieldHalf, IconFilter,
@@ -42,6 +41,21 @@ function debounce(func, wait) {
     clearTimeout(timeout);
     timeout = setTimeout(later, wait);
   };
+}
+
+function useDebouncedCallback(callback, delay) {
+  const callbackRef = useRef(callback);
+  const timeoutRef = useRef(null);
+  callbackRef.current = callback;
+
+  useEffect(() => () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+  }, []);
+
+  return useCallback((...args) => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => callbackRef.current(...args), delay);
+  }, [delay]);
 }
 
 function PhotoThumbs({ urls = [], size = 64, title = "Photo" }) {
@@ -85,7 +99,6 @@ function PhotoThumbs({ urls = [], size = 64, title = "Photo" }) {
   );
 }
 
-function pct(n, d) { return d ? Math.round((n / d) * 100) : 0; }
 function canTaskBeCompleted(task, state) {
   if (!state) return false;
   if (state.na) return true;
@@ -192,12 +205,47 @@ function EmployeeFiltersForm({ positionFilter, setPositionFilter, templates, onC
 }
 
 /** ---------------------- PIN Pad Component ---------------------- */
-function PinPad({ onNumberClick, onBackspace, onClear }) {
-  const { colorScheme } = useMantineColorScheme();
+function hapticTap() {
+  try {
+    navigator.vibrate?.(8);
+  } catch {
+    /* ignore */
+  }
+}
+
+const PinButton = React.memo(function PinButton({ value, label, styles, disabled, onPress }) {
+  const handlePointerDown = useCallback((e) => {
+    if (disabled) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    hapticTap();
+    onPress(value);
+  }, [disabled, onPress, value]);
+
+  return (
+    <Button
+      type="button"
+      className="pin-pad-btn"
+      onPointerDown={handlePointerDown}
+      onClick={(e) => e.preventDefault()}
+      disabled={disabled}
+      fullWidth
+      styles={styles}
+      aria-label={typeof value === 'number' ? `Digit ${value}` : String(label)}
+    >
+      {label}
+    </Button>
+  );
+});
+
+const PinPad = React.memo(function PinPad({ onNumberClick, onBackspace, onClear, disabled }) {
   const computed = useComputedColorScheme('light');
   const isDark = computed === 'dark';
 
-  const handleClick = (value) => {
+  const handlePress = useCallback((value) => {
+    if (disabled) return;
     if (value === 'backspace') {
       onBackspace?.();
     } else if (value === 'clear') {
@@ -205,9 +253,9 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
     } else {
       onNumberClick?.(value);
     }
-  };
+  }, [disabled, onBackspace, onClear, onNumberClick]);
 
-  const buttonStyles = {
+  const buttonStyles = useMemo(() => ({
     root: {
       height: 72,
       fontSize: '1.75rem',
@@ -217,18 +265,22 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
       border: isDark ? '1px solid #404040' : '1px solid #e5e5e5',
       borderRadius: '12px',
       boxShadow: isDark ? '0 1px 3px rgba(0, 0, 0, 0.3)' : '0 1px 3px rgba(0, 0, 0, 0.08)',
-      transition: 'all 0.15s ease',
+      transition: 'transform 0.08s ease, box-shadow 0.08s ease, background-color 0.08s ease',
+      touchAction: 'manipulation',
+      WebkitTapHighlightColor: 'transparent',
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
       '&:hover': {
         backgroundColor: isDark ? '#353535' : '#ffffff',
-        border: isDark ? '1px solid #404040' : '1px solid #e5e5e5',
       },
       '&:active': {
-        backgroundColor: isDark ? '#353535' : '#ffffff',
-      }
-    }
-  };
+        transform: 'scale(0.96)',
+        boxShadow: '0 0 0 rgba(0, 0, 0, 0.08)',
+      },
+    },
+  }), [isDark]);
 
-  const actionButtonStyles = {
+  const actionButtonStyles = useMemo(() => ({
     root: {
       height: 72,
       fontSize: '1.25rem',
@@ -238,217 +290,140 @@ function PinPad({ onNumberClick, onBackspace, onClear }) {
       border: isDark ? '1px solid #404040' : '1px solid #e5e5e5',
       borderRadius: '12px',
       boxShadow: isDark ? '0 1px 3px rgba(0, 0, 0, 0.3)' : '0 1px 3px rgba(0, 0, 0, 0.08)',
-      transition: 'all 0.15s ease',
+      transition: 'transform 0.08s ease, box-shadow 0.08s ease, background-color 0.08s ease',
+      touchAction: 'manipulation',
+      WebkitTapHighlightColor: 'transparent',
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
       '&:hover': {
         backgroundColor: isDark ? '#353535' : '#ffffff',
-        border: isDark ? '1px solid #404040' : '1px solid #e5e5e5',
       },
       '&:active': {
-        backgroundColor: isDark ? '#353535' : '#ffffff',
-      }
-    }
-  };
+        transform: 'scale(0.96)',
+        boxShadow: '0 0 0 rgba(0, 0, 0, 0.08)',
+      },
+    },
+  }), [isDark]);
+
+  const rows = useMemo(() => [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
+    ['clear', 0, 'backspace'],
+  ], []);
 
   return (
     <Grid gutter={12}>
-      {[1, 2, 3].map(num => (
-        <Grid.Col key={num} span={4}>
-          <Button
-            onClick={() => handleClick(num)}
-            fullWidth
-            styles={buttonStyles}
-            onMouseDown={(e) => {
-              e.currentTarget.style.transform = 'scale(0.96)';
-              e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
-            }}
-            onMouseUp={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-            }}
-          >
-            {num}
-          </Button>
-        </Grid.Col>
-      ))}
-      {[4, 5, 6].map(num => (
-        <Grid.Col key={num} span={4}>
-          <Button
-            onClick={() => handleClick(num)}
-            fullWidth
-            styles={buttonStyles}
-            onMouseDown={(e) => {
-              e.currentTarget.style.transform = 'scale(0.96)';
-              e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
-            }}
-            onMouseUp={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-            }}
-          >
-            {num}
-          </Button>
-        </Grid.Col>
-      ))}
-      {[7, 8, 9].map(num => (
-        <Grid.Col key={num} span={4}>
-          <Button
-            onClick={() => handleClick(num)}
-            fullWidth
-            styles={buttonStyles}
-            onMouseDown={(e) => {
-              e.currentTarget.style.transform = 'scale(0.96)';
-              e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
-            }}
-            onMouseUp={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-            }}
-          >
-            {num}
-          </Button>
-        </Grid.Col>
-      ))}
-      <Grid.Col span={4}>
-        <Button
-          onClick={() => handleClick('clear')}
-          fullWidth
-          styles={actionButtonStyles}
-          onMouseDown={(e) => {
-            e.currentTarget.style.transform = 'scale(0.96)';
-            e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
-          }}
-          onMouseUp={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-          }}
-        >
-          Clear
-        </Button>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Button
-          onClick={() => handleClick(0)}
-          fullWidth
-          styles={buttonStyles}
-          onMouseDown={(e) => {
-            e.currentTarget.style.transform = 'scale(0.96)';
-            e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
-          }}
-          onMouseUp={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-          }}
-        >
-          0
-        </Button>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Button
-          onClick={() => handleClick('backspace')}
-          fullWidth
-          styles={actionButtonStyles}
-          onMouseDown={(e) => {
-            e.currentTarget.style.transform = 'scale(0.96)';
-            e.currentTarget.style.boxShadow = '0 0 0 rgba(0, 0, 0, 0.08)';
-          }}
-          onMouseUp={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.08)';
-          }}
-        >
-          ⌫
-        </Button>
-      </Grid.Col>
+      {rows.flatMap((row) =>
+        row.map((key) => {
+          const isAction = key === 'clear' || key === 'backspace';
+          const label = key === 'backspace' ? '⌫' : key === 'clear' ? 'Clear' : key;
+          return (
+            <Grid.Col key={String(key)} span={4}>
+              <PinButton
+                value={key}
+                label={label}
+                disabled={disabled}
+                onPress={handlePress}
+                styles={isAction ? actionButtonStyles : buttonStyles}
+              />
+            </Grid.Col>
+          );
+        })
+      )}
     </Grid>
   );
-}
+});
 
 /** ---------------------- Pin Modal ---------------------- */
-function PinDialog({ opened, onClose, onConfirm }) {
+const PinDialog = React.memo(function PinDialog({ opened, onClose, onConfirm }) {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
-  const { colorScheme } = useMantineColorScheme();
+  const [loading, setLoading] = useState(false);
+  const inputRef = useRef(null);
   const computed = useComputedColorScheme('light');
   const isDark = computed === 'dark';
+  const isPhone = useMediaQuery('(max-width: 36em)');
+  const isCoarsePointer = useMediaQuery('(pointer: coarse)');
 
-  // Clear when the modal opens
   useEffect(() => {
     if (opened) {
       setPin('');
       setError('');
+      setLoading(false);
+      if (!isCoarsePointer) {
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
     }
-  }, [opened]);
+  }, [opened, isCoarsePointer]);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
+    if (loading) return;
     setPin('');
     setError('');
     onClose?.();
-  };
+  }, [loading, onClose]);
 
-  const handleNumberClick = (num) => {
-    if (pin.length < 6) {
-      setPin(prev => prev + String(num));
-      setError('');
-    }
-  };
-
-  const handleBackspace = () => {
-    setPin(prev => prev.slice(0, -1));
+  const handleNumberClick = useCallback((num) => {
+    if (loading) return;
+    setPin((prev) => {
+      if (prev.length >= 6) return prev;
+      return prev + String(num);
+    });
     setError('');
-  };
+  }, [loading]);
 
-  const handleClear = () => {
+  const handleBackspace = useCallback(() => {
+    if (loading) return;
+    setPin((prev) => prev.slice(0, -1));
+    setError('');
+  }, [loading]);
+
+  const handleClear = useCallback(() => {
+    if (loading) return;
     setPin('');
     setError('');
-  };
+  }, [loading]);
 
-  const handleConfirm = () => {
+  const handleConfirm = useCallback(async () => {
+    if (loading) return;
     if (pin.length === 0) {
       setError('Please enter a PIN');
       return;
     }
-    const p = pin;
-    setPin('');              // clear immediately so it never "sticks"
-    setError('');
-    onConfirm?.(p);
-  };
 
-  // Handle keyboard input as fallback
-  const handleKeyPress = (e) => {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await onConfirm?.(pin);
+      if (result?.ok) {
+        setPin('');
+        setError('');
+      } else if (result?.error) {
+        setError(result.error);
+      } else if (result?.ok === false) {
+        setError('Wrong PIN. Please try again.');
+      }
+    } catch (e) {
+      setError(e.message || 'Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [loading, onConfirm, pin]);
+
+  const handleKeyPress = useCallback((e) => {
+    if (loading) return;
     if (e.key >= '0' && e.key <= '9') {
       handleNumberClick(e.key);
     } else if (e.key === 'Backspace') {
       handleBackspace();
     } else if (e.key === 'Enter') {
+      e.preventDefault();
       handleConfirm();
     } else if (e.key === 'Escape') {
       handleClose();
     }
-  };
+  }, [loading, handleNumberClick, handleBackspace, handleConfirm, handleClose]);
 
   const modalBg = isDark ? '#1a1a1a' : '#ffffff';
   const textColor = isDark ? '#e0e0e0' : '#666666';
@@ -460,18 +435,23 @@ function PinDialog({ opened, onClose, onConfirm }) {
   const cancelHover = isDark ? '#2c2c2c' : '#f5f5f5';
 
   return (
-    <Modal 
-      opened={opened} 
-      onClose={handleClose} 
+    <Modal
+      opened={opened}
+      onClose={handleClose}
       title={null}
       centered
       size="sm"
+      fullScreen={isPhone}
+      lockScroll
+      classNames={{ content: 'pin-modal-content', inner: 'pin-modal-inner' }}
       withCloseButton={false}
       closeOnClickOutside={false}
+      closeOnEscape={!loading}
+      transitionProps={{ duration: 120 }}
       styles={{
         content: {
-          maxWidth: 360,
-          padding: '32px 24px',
+          maxWidth: isCoarsePointer ? 420 : 360,
+          padding: isCoarsePointer ? '28px 20px' : '32px 24px',
           backgroundColor: modalBg,
         },
         body: {
@@ -480,33 +460,32 @@ function PinDialog({ opened, onClose, onConfirm }) {
         },
         overlay: {
           backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        }
+        },
       }}
     >
-      <Stack gap={32} style={{ backgroundColor: modalBg }}>
-        {/* PIN Display */}
+      <Stack gap={isCoarsePointer ? 24 : 32} style={{ backgroundColor: modalBg }}>
         <Center>
           <Stack gap={16} align="center">
-            <Text 
-              size="lg" 
-              fw={500} 
-              style={{ 
+            <Text
+              size="lg"
+              fw={500}
+              style={{
                 letterSpacing: '0.5px',
                 color: textColor,
               }}
             >
               Enter PIN
             </Text>
-            <Group gap={12} justify="center">
+            <Group gap={isCoarsePointer ? 16 : 12} justify="center">
               {[0, 1, 2, 3, 4, 5].map((i) => (
                 <div
                   key={i}
                   style={{
-                    width: 12,
-                    height: 12,
+                    width: isCoarsePointer ? 14 : 12,
+                    height: isCoarsePointer ? 14 : 12,
                     borderRadius: '50%',
                     backgroundColor: i < pin.length ? dotFilled : dotEmpty,
-                    transition: 'all 0.2s ease',
+                    transition: 'background-color 0.12s ease',
                   }}
                 />
               ))}
@@ -514,70 +493,79 @@ function PinDialog({ opened, onClose, onConfirm }) {
           </Stack>
         </Center>
 
-        {/* Hidden input for keyboard support */}
         <TextInput
+          ref={inputRef}
           type="text"
           inputMode="numeric"
           pattern="[0-9]*"
+          autoComplete="one-time-code"
           value={pin}
           onChange={(e) => {
+            if (loading) return;
             const value = e.currentTarget.value.replace(/\D/g, '').slice(0, 6);
             setPin(value);
             setError('');
           }}
           onKeyDown={handleKeyPress}
-          autoFocus
-          style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+          aria-hidden="true"
+          style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden', clip: 'rect(0,0,0,0)' }}
           tabIndex={-1}
         />
 
-        {/* Error message */}
         {error && (
           <Text size="sm" ta="center" style={{ minHeight: 20, color: '#ff6b6b' }}>{error}</Text>
         )}
 
-        {/* PIN Pad */}
         <PinPad
           onNumberClick={handleNumberClick}
           onBackspace={handleBackspace}
           onClear={handleClear}
+          disabled={loading}
         />
 
-        {/* Action buttons */}
-        <Group justify="flex-end" gap={12}>
-          <Button 
-            variant="subtle" 
+        <Group justify="flex-end" gap={12} className="pin-modal-actions">
+          <Button
+            type="button"
+            variant="subtle"
             onClick={handleClose}
+            disabled={loading}
             styles={{
               root: {
                 backgroundColor: 'transparent',
                 color: cancelColor,
                 fontWeight: 400,
+                touchAction: 'manipulation',
+                minHeight: 44,
                 '&:hover': {
                   backgroundColor: cancelHover,
-                }
-              }
+                },
+              },
             }}
           >
             Cancel
           </Button>
-          <Button 
+          <Button
+            type="button"
             onClick={handleConfirm}
-            disabled={pin.length === 0}
+            disabled={pin.length === 0 || loading}
+            loading={loading}
             styles={{
               root: {
                 backgroundColor: confirmBg,
                 color: confirmColor,
                 fontWeight: 400,
-                transition: 'all 0.2s ease',
+                touchAction: 'manipulation',
+                minHeight: 44,
+                minWidth: 104,
+                transition: 'background-color 0.12s ease',
                 '&:hover': {
                   backgroundColor: confirmBg,
                 },
                 '&:disabled': {
                   backgroundColor: isDark ? '#2c2c2c' : '#e5e5e5',
                   color: isDark ? '#666666' : '#999999',
-                }
-              }
+                },
+              },
             }}
           >
             Confirm
@@ -586,7 +574,7 @@ function PinDialog({ opened, onClose, onConfirm }) {
       </Stack>
     </Modal>
   );
-}
+});
 
 /** ---------------------- Evidence ---------------------- */
 function EvidenceRow({ state }) {
@@ -650,9 +638,11 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
             <ActionIcon
               variant="subtle"
               onClick={() => setIsExpanded(!isExpanded)}
-              aria-label="Toggle group"
+              aria-label={isExpanded ? 'Collapse group' : 'Expand group'}
+              size="xl"
+              style={{ minWidth: 44, minHeight: 44, touchAction: 'manipulation' }}
             >
-              {isExpanded ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+              {isExpanded ? <IconChevronDown size={20} /> : <IconChevronRight size={20} />}
             </ActionIcon>
             <div>
               <Text fw={600} size="md" c={isDark ? "white" : "dark"}>{title}</Text>
@@ -845,39 +835,42 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
           : isSelected
           ? "color-mix(in oklab, var(--mantine-color-blue-6) 5%, var(--mantine-color-body))"
           : "var(--mantine-color-body)",
-        transition: 'all 0.2s ease',
+        transition: 'border-color 0.15s ease, background-color 0.15s ease',
         marginBottom: '0.75rem',
-        cursor: 'pointer',
+        touchAction: 'manipulation',
       }}
-      onClick={() => !opened && onToggle()}
     >
       <Group gap="md" align="center" wrap="nowrap">
-        {/* Checkbox for selection - centered vertically */}
         {onSelectChange && (
           <Box
+            className="task-card-checkbox-hit"
             style={{ 
               display: 'flex', 
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
-              height: '100%',
-              minHeight: '40px'
             }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectChange(tasklist.id, task.id, !isSelected);
+            }}
+            role="button"
+            aria-label={`Select task: ${task.title}`}
+            aria-pressed={!!isSelected}
           >
             <input
               type="checkbox"
               checked={isSelected || false}
-              onChange={(e) => onSelectChange(tasklist.id, task.id, e.currentTarget.checked)}
-              onClick={(e) => e.stopPropagation()}
+              readOnly
+              tabIndex={-1}
               style={{ 
-                width: '20px', 
-                height: '20px', 
-                cursor: 'pointer',
+                width: '22px', 
+                height: '22px', 
+                pointerEvents: 'none',
                 accentColor: 'var(--mantine-color-blue-6)',
                 margin: 0
               }}
-              aria-label={`Select task: ${task.title}`}
+              aria-hidden="true"
             />
           </Box>
         )}
@@ -890,14 +883,20 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
               <ActionIcon 
                 variant="subtle" 
                 onClick={(e) => { e.stopPropagation(); onToggle(); }}
-                aria-label="Toggle details"
-                size="sm"
-                style={{ flexShrink: 0 }}
+                aria-label={opened ? 'Collapse task details' : 'Expand task details'}
+                size="xl"
+                style={{ flexShrink: 0, minWidth: 44, minHeight: 44, touchAction: 'manipulation' }}
               >
-                {opened ? <IconChevronDown size={18} /> : <IconChevronRight size={18} />}
+                {opened ? <IconChevronDown size={20} /> : <IconChevronRight size={20} />}
               </ActionIcon>
               
-              <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
+              <Stack
+                gap={2}
+                style={{ minWidth: 0, flex: 1, cursor: 'pointer', touchAction: 'manipulation' }}
+                onClick={(e) => { e.stopPropagation(); onToggle(); }}
+                role="button"
+                aria-expanded={opened}
+              >
                 <Text 
                   fw={800} 
                   fz="lg" 
@@ -993,14 +992,15 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
               </FileButton>
 
               <Button
+                className="task-card-complete-btn"
                 variant={isComplete ? "light" : "gradient"}
                 gradient={isComplete ? undefined : { from: 'blue', to: 'cyan' }}
                 color={isComplete ? "green" : undefined}
                 onClick={(e) => { e.stopPropagation(); onComplete(); }}
                 disabled={!canComplete || isComplete}
-                size="sm"
+                size="md"
                 fw={600}
-                style={{ minWidth: rem(110) }}
+                style={{ minWidth: rem(120), touchAction: 'manipulation' }}
                 leftSection={isComplete ? <IconCheck size={16} /> : null}
               >
                 {isComplete ? "Completed" : "Complete Task"}
@@ -1057,12 +1057,14 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
               )}
             </FileButton>
             <Button
+              className="task-card-complete-btn"
               variant={isComplete ? "outline" : "default"}
               color={isComplete ? "green" : undefined}
-              onClick={onComplete}
+              onClick={(e) => { e.stopPropagation(); onComplete(); }}
               disabled={!canComplete || isComplete}
               fullWidth
-              size="sm"
+              size="md"
+              style={{ touchAction: 'manipulation' }}
             >
               {isComplete ? "Completed ✓" : "Complete Task"}
             </Button>
@@ -1141,18 +1143,15 @@ function EmployeeView({
   }, [company?.id, restockLocationId, applyRestockRows]);
 
   // Debounced restock refresh to prevent rapid-fire updates
-  const debouncedRefreshRestock = useCallback(
-    debounce(async () => {
-      if (!company?.id) return;
-      try {
-        const rows = await listRestockRequests(company.id, { locationId: restockLocationId, status: null });
-        applyRestockRows(rows);
-      } catch (e) {
-        console.error('Failed to refresh restock list:', e);
-      }
-    }, 300),
-    [company?.id, restockLocationId, applyRestockRows]
-  );
+  const debouncedRefreshRestock = useDebouncedCallback(async () => {
+    if (!company?.id) return;
+    try {
+      const rows = await listRestockRequests(company.id, { locationId: restockLocationId, status: null });
+      applyRestockRows(rows);
+    } catch (e) {
+      console.error('Failed to refresh restock list:', e);
+    }
+  }, 300);
 
   const handleRestockSubmitted = useCallback(() => {
     debouncedRefreshRestock();
@@ -1359,9 +1358,8 @@ function EmployeeView({
         try {
           // 1) Validate PIN *per company* once for all tasks
           const user = await validatePin({ supabase, companyId: company.id, pin });
-          if (!user) { 
-            alert('Wrong PIN. Please try again.'); 
-            return; 
+          if (!user) {
+            return { ok: false, error: 'Wrong PIN. Please try again.' };
           }
 
           const dateISO = todayISOInTz(company.timezone || 'UTC');
@@ -1483,12 +1481,11 @@ function EmployeeView({
           // Clear selection and close modal
           clearSelection();
           setPinModal({ open: false, onConfirm: null });
-          
-          alert(`✓ Successfully completed ${validTasks.length} task${validTasks.length > 1 ? 's' : ''}!`);
+
+          return { ok: true };
         } catch (e) {
           console.error(e);
-          alert(e.message || 'Failed to complete tasks. Please try again.');
-          // Don't close modal on error - let user try again
+          return { ok: false, error: e.message || 'Failed to complete tasks. Please try again.' };
         }
       },
     });
@@ -2030,8 +2027,6 @@ function resolveTasklistsForDayFromLists({ timeBlocks, templates }, locationId, 
   return list;
 }
 
-
-
 function EmployeeReworkCard({ s, setSubmissions, setWorking, getTaskMeta, company }) {
   function updateSubmissionTask(submissionId, taskId, patch) {
     setSubmissions((prev) =>
@@ -2394,7 +2389,7 @@ function ManagerView({
       return { ...prev, [subId]: cur };
     });
   }
-
+  
   async function markTasksRework({ supabase, submissionId, taskIds, note }) {
     const { error } = await supabase.rpc('mark_rework', {
       p_submission_id: submissionId,
@@ -2547,18 +2542,16 @@ function ManagerView({
           <Tabs.Tab 
             value="approve" 
             leftSection={<IconShieldHalf size={14} />}
-            style={{ cursor: 'pointer' }}
-            onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-1px)')}
-            onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+            className="tab-hover-lift"
+            style={{ cursor: 'pointer', transition: 'transform 120ms ease' }}
           >
             Approve
           </Tabs.Tab>
           <Tabs.Tab 
             value="dashboard" 
             leftSection={<IconLayoutGrid size={14} />}
-            style={{ cursor: 'pointer' }}
-            onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-1px)')}
-            onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+            className="tab-hover-lift"
+            style={{ cursor: 'pointer', transition: 'transform 120ms ease' }}
           >
             Dashboard
           </Tabs.Tab>
@@ -3287,7 +3280,6 @@ function ManagerView({
   );
 }
 
-
 /** ---------------------- Main App ---------------------- */
 const baseTheme = createTheme({
   fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
@@ -3360,19 +3352,8 @@ function AppInner() {
   useEffect(() => { refreshHeaderData(); loadCompany(); }, [refreshHeaderData, loadCompany]);
 
   // Debounced refresh functions to prevent rapid-fire updates
-  const debouncedRefreshHeaderData = useCallback(
-    debounce(() => {
-      refreshHeaderData();
-    }, 300),
-    [refreshHeaderData]
-  );
-
-  const debouncedLoadCompany = useCallback(
-    debounce(() => {
-      loadCompany();
-    }, 300),
-    [loadCompany]
-  );
+  const debouncedRefreshHeaderData = useDebouncedCallback(refreshHeaderData, 300);
+  const debouncedLoadCompany = useDebouncedCallback(loadCompany, 300);
 
   // live updates when Admin creates/edits/deletes
   // realtime for header lists (scoped)
@@ -3401,12 +3382,7 @@ function AppInner() {
   useEffect(() => { loadChecklists(); }, [loadChecklists]);
 
   // Debounced load checklists to prevent rapid-fire updates
-  const debouncedLoadChecklists = useCallback(
-    debounce(() => {
-      loadChecklists();
-    }, 300),
-    [loadChecklists]
-  );
+  const debouncedLoadChecklists = useDebouncedCallback(loadChecklists, 300);
 
   useEffect(() => {
     if (!companyId) return;
@@ -3442,6 +3418,7 @@ function AppInner() {
     key: "theme",
     defaultValue: "light",
   });
+  const [mobileMenuOpened, { open: openMobileMenu, close: closeMobileMenu, toggle: toggleMobileMenu }] = useDisclosure(false);
 
   // Keep activeLocation valid when Admin edits locations - optimized with useMemo
   const validActiveLocationId = useMemo(() => {
@@ -3494,39 +3471,18 @@ function AppInner() {
     return () => clearInterval(id);
   }, [company.timezone]);
 
-  // Today's tasklists (from admin templates + ad-hoc) - optimized with requestIdleCallback
-  const [tasklistsToday, setTasklistsToday] = useState([]);
-  
-  useEffect(() => {
-    const computeTasklists = () => {
-      const today = todayISOInTz(company.timezone || 'UTC');
-      const all = resolveTasklistsForDayFromLists(checklists, activeLocationId, today, company.timezone);
-      if (!positionFilter) return all;
-      // Filter templates by positions
-      const pf = String(positionFilter).trim();
-      return all.filter((tl) => {
-        // find template meta to check positions
-        const tpl = (checklists.templates || []).find((t) => t.id === tl.id);
-        const positions = Array.isArray(tpl?.positions) ? tpl.positions : [];
-        if (!pf) return true;
-        // match if template has position equal to selection
-        return positions.map(String).includes(pf);
-      });
-    };
-
-    // Use requestIdleCallback to defer computation when browser is idle
-    if (window.requestIdleCallback) {
-      const idleCallback = window.requestIdleCallback(() => {
-        setTasklistsToday(computeTasklists());
-      }, { timeout: 100 });
-      return () => window.cancelIdleCallback(idleCallback);
-    } else {
-      // Fallback for browsers without requestIdleCallback
-      const timeoutId = setTimeout(() => {
-        setTasklistsToday(computeTasklists());
-      }, 0);
-      return () => clearTimeout(timeoutId);
-    }
+  // Today's tasklists (from admin templates + ad-hoc)
+  const tasklistsToday = useMemo(() => {
+    const today = todayISOInTz(company.timezone || 'UTC');
+    const all = resolveTasklistsForDayFromLists(checklists, activeLocationId, today, company.timezone);
+    if (!positionFilter) return all;
+    const pf = String(positionFilter).trim();
+    return all.filter((tl) => {
+      const tpl = (checklists.templates || []).find((t) => t.id === tl.id);
+      const positions = Array.isArray(tpl?.positions) ? tpl.positions : [];
+      if (!pf) return true;
+      return positions.map(String).includes(pf);
+    });
   }, [checklists, activeLocationId, company.timezone, positionFilter]);
   const restockLocationId = tasklistsToday[0]?.locationId || null;
 
@@ -3586,17 +3542,8 @@ function AppInner() {
         });
       }
 
-      // Use requestIdleCallback to defer state update when browser is idle
-      if (window.requestIdleCallback) {
-        window.requestIdleCallback(() => {
-          if (!cancelled) setWorking(nextWorking);
-        }, { timeout: 50 });
-      } else {
-        // Fallback for browsers without requestIdleCallback
-        setTimeout(() => {
-          if (!cancelled) setWorking(nextWorking);
-        }, 0);
-      }
+      if (cancelled) return;
+      setWorking(nextWorking);
     };
 
     processWorkingState();
@@ -3628,46 +3575,11 @@ function AppInner() {
   const [working, setWorking] = useState({});
   const [submissions, setSubmissions] = useState([]);
   const [pinModal, setPinModal] = useState({ open: false, onConfirm: null });
+  const closePinModal = useCallback(() => {
+    setPinModal({ open: false, onConfirm: null });
+  }, []);
   const [employeeTab, setEmployeeTab] = useState('tasks');
   const [restockOpenCount, setRestockOpenCount] = useState(0);
-
-  // Optimized working state synchronization with useMemo
-  const optimizedWorkingState = useMemo(() => {
-    return (prevWorking) => {
-      const next = { ...prevWorking };
-
-      tasklistsToday.forEach((tl) => {
-        const existing = next[tl.id] ?? [];
-        const byId = new Map(existing.map((s) => [s.taskId, s]));
-
-        // ensure there's a state row for every current task
-        const merged = tl.tasks.map((t) =>
-          byId.get(t.id) ?? {
-            taskId: t.id,
-            status: "Incomplete",
-            value: null,
-            note: "",
-            photos: [],
-            na: false,
-            reviewStatus: "Pending",
-          }
-        );
-
-        next[tl.id] = merged;
-      });
-
-      // drop tasklists that no longer exist today
-      Object.keys(next).forEach((k) => {
-        if (!tasklistsToday.find((tl) => tl.id === k)) delete next[k];
-      });
-
-      return next;
-    };
-  }, [tasklistsToday]);
-
-  useEffect(() => {
-    setWorking(optimizedWorkingState);
-  }, [optimizedWorkingState]);
 
   // Manager submissions filtered by position (to reflect the same filter globally)
   const submissionsFilteredByPosition = useMemo(() => {
@@ -3701,10 +3613,8 @@ function AppInner() {
         try {
           // 1) Validate PIN *per company* every time
           const user = await validatePin({ supabase, companyId: company.id, pin });
-          if (!user) { 
-            alert('Wrong PIN. Please try again.'); 
-            // Don't close modal on wrong PIN - let user try again
-            return; 
+          if (!user) {
+            return { ok: false, error: 'Wrong PIN. Please try again.' };
           }
 
           // 2) Find/create submission for today
@@ -3735,48 +3645,15 @@ function AppInner() {
               value: valueText || null,
               note: st.note ?? null,
               photos: Array.isArray(st.photos) ? st.photos : [],
-              submitted_by: user.id,       // <<<<<<<<<< IMPORTANT
+              submitted_by: user.id,
             },
           });
 
-          // (optional) also stamp the parent submission with the same user if you add a matching column
-          await supabase.from('submission')
+          supabase.from('submission')
             .update({ submitted_by: user.id })
             .eq('id', submissionId)
-            .eq('company_id', company.id);
-
-          // keep the rest of your refresh/optimistic UI as-is ...
-          try {
-            const { tasks } = await fetchSubmissionAndTasks({
-              supabase,
-              companyId: company.id,
-              tasklistId: tasklist.id,
-              locationId: tasklist.locationId,
-              dateISO
-            });
-            const byId = new Map(tasks.map(r => [r.task_id, r]));
-            setWorking(prev => ({
-              ...prev,
-              [tasklist.id]: tasklist.tasks.map(t => {
-                const row = byId.get(t.id);
-                return row ? {
-                  taskId: t.id,
-                  status: row.status,
-                  reviewStatus: row.review_status,
-                  na: !!row.na,
-                  value: task.inputType === 'number'
-                    ? (row.value !== null && row.value !== '' ? Number(row.value) : null)
-                    : task.inputType === 'text'
-                      ? (row.value ?? '')
-                      : row.value,
-                  note: row.note ?? '',
-                  photos: Array.isArray(row.photos) ? row.photos : [],
-                } : (prev[tasklist.id]?.find(x => x.taskId === t.id) ?? {
-                  taskId: t.id, status: 'Incomplete', reviewStatus: 'Pending', na: false, value: null, note: '', photos: []
-                });
-              })
-            }));
-          } catch { }
+            .eq('company_id', company.id)
+            .then(() => {});
 
           setWorking(prev => ({
             ...prev,
@@ -3785,12 +3662,11 @@ function AppInner() {
             ),
           }));
 
-          // Only close modal on successful completion
           setPinModal({ open: false, onConfirm: null });
+          return { ok: true };
         } catch (e) {
           console.error(e);
-          alert(e.message || 'Failed to complete task');
-          // Don't close modal on error - let user try again
+          return { ok: false, error: e.message || 'Failed to complete task' };
         }
       },
     });
@@ -3871,10 +3747,8 @@ function AppInner() {
         try {
           // Validate PIN before submission
           const user = await validatePin({ supabase, companyId: company.id, pin });
-          if (!user) { 
-            alert('Wrong PIN. Please try again.'); 
-            // Don't close modal on wrong PIN - let user try again
-            return; 
+          if (!user) {
+            return { ok: false, error: 'Wrong PIN. Please try again.' };
           }
 
           const payload = (working[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" }));
@@ -3898,11 +3772,10 @@ function AppInner() {
           
           // Only close modal on successful submission
           setPinModal({ open: false, onConfirm: null });
-          alert("Submitted for manager review.");
+          return { ok: true };
         } catch (e) {
           console.error(e);
-          alert(e.message || 'Failed to submit tasklist');
-          // Don't close modal on error - let user try again
+          return { ok: false, error: e.message || 'Failed to submit tasklist' };
         }
       },
     });
@@ -3913,22 +3786,18 @@ function AppInner() {
   return (
     <MantineProvider theme={baseTheme} forceColorScheme={scheme}>
       <AppShell
-        header={{ height: 100 }}
+        header={{ height: { base: 56, sm: 100 } }}
         padding="md"
         withBorder={false}
         styles={{ main: { minHeight: "100dvh", background: "var(--mantine-color-body)" } }}
       >
         <AppShell.Header style={{ borderBottom: "1px solid var(--mantine-color-gray-3)" }}>
-          {/** Mobile/Tablet Drawer state */}
-          {(() => {
-            const [opened, { open, close, toggle }] = useDisclosure(false);
-            return (
-              <>
-                {/* Top bar */}
-                <Group h={56} px="sm" justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
-                  {/* Left: brand */}
-                  <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-                    <Burger opened={opened} onClick={toggle} aria-label="Open menu" hiddenFrom="sm" />
+          <>
+            {/* Top bar */}
+            <Group h={56} px="sm" justify="space-between" wrap="nowrap" style={{ width: "100%" }}>
+              {/* Left: brand */}
+              <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+                <Burger opened={mobileMenuOpened} onClick={toggleMobileMenu} aria-label="Open menu" hiddenFrom="sm" />
                     {company.logo ? (
                       <img src={company.logo} alt="Logo" style={{ width: 60, height: 60, borderRadius: 8, objectFit: "cover" }} />
                     ) : (
@@ -3956,7 +3825,7 @@ function AppInner() {
                     />
 
                     {/* Employee + Location quick buttons (open drawer on mobile) */}
-                    <ActionIcon variant="default" title="Employee / Location" onClick={open} hiddenFrom="sm">
+                    <ActionIcon variant="default" title="Employee / Location" onClick={openMobileMenu} hiddenFrom="sm">
                       <IconUser size={16} />
                     </ActionIcon>
                     <ActionIcon variant="default" title="Theme" onClick={() => setScheme(scheme === "dark" ? "light" : "dark")} hiddenFrom="sm">
@@ -3965,16 +3834,6 @@ function AppInner() {
 
                     {/* Full controls on ≥sm */}
                     <Group gap="xs" visibleFrom="sm" wrap="nowrap">
-                      <Select
-                        value={currentEmployee}
-                        onChange={setCurrentEmployee}
-                        data={employees.map((l) => ({ value: String(l.id), label: l.display_name }))}
-                        w={200}
-                        leftSection={<IconUser size={14} />}
-                        comboboxProps={{ withinPortal: true }}
-                        placeholder="Employee"
-                        searchable
-                      />
                       <Select
                         value={activeLocationId}
                         onChange={setActiveLocationId}
@@ -3999,7 +3858,7 @@ function AppInner() {
                 </Group>
 
                 {/* Drawer for mobile controls */}
-                <Drawer opened={opened} onClose={close} title={company.name || "Menu"} padding="md" size="100%" hiddenFrom="sm">
+            <Drawer opened={mobileMenuOpened} onClose={closeMobileMenu} title={company.name || "Menu"} padding="md" size="100%" hiddenFrom="sm">
                   <Stack gap="md">
                     <SegmentedControl value={mode} onChange={setMode} data={ModeTabsText} />
                     <Divider label="Context" />
@@ -4039,18 +3898,16 @@ function AppInner() {
                       </Group>
                     </Group>
                   </Stack>
-                </Drawer>
-              </>
-            );
-          })()}
+            </Drawer>
+          </>
         </AppShell.Header>
 
         {/* Page-level tabs sticky under header */}
         {mode === 'employee' && (
           <div
+            className="employee-subnav"
             style={{
               position: 'sticky',
-              top: 100,
               zIndex: 2,
               background: 'var(--mantine-color-body)',
             }}
@@ -4075,9 +3932,8 @@ function AppInner() {
                     <Tabs.Tab
                       value="tasks"
                       leftSection={<IconListCheck size={14} />}
-                      style={{ cursor: 'pointer' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-1px)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+                      className="tab-hover-lift"
+                      style={{ cursor: 'pointer', transition: 'transform 120ms ease' }}
                     >
                       Tasks
                     </Tabs.Tab>
@@ -4085,9 +3941,8 @@ function AppInner() {
                     <Tabs.Tab
                       value="restock"
                       leftSection={<IconShoppingCart size={14} />}
-                      style={{ cursor: 'pointer' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.transform = 'translateY(-1px)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.transform = 'translateY(0)')}
+                      className="tab-hover-lift"
+                      style={{ cursor: 'pointer', transition: 'transform 120ms ease' }}
                     >
                       <Group gap={6} wrap="nowrap">
                         <span>Restock</span>
@@ -4233,7 +4088,7 @@ function AppInner() {
           )}
         </AppShell.Main>
 
-        <PinDialog opened={pinModal.open} onClose={() => setPinModal({ open: false, onConfirm: null })} onConfirm={pinModal.onConfirm} />
+        <PinDialog opened={pinModal.open} onClose={closePinModal} onConfirm={pinModal.onConfirm} />
       </AppShell>
     </MantineProvider>
   );

@@ -2,19 +2,27 @@
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --touch-min: 44px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* collapse table columns on small screens */
-@media (max-width: 48em) { /* Mantine 'sm' */
+@media (max-width: 48em) {
   .hide-sm { display: none !important; }
 }
 
-/* keep sticky cards from consuming too much space on short phones */
 @media (max-height: 700px) {
   .sticky-card { top: 64px !important; }
 }
@@ -32,7 +40,9 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   display: block;
+  overscroll-behavior-y: none;
 }
 
 h1 {
@@ -50,6 +60,7 @@ button {
   background-color: #1a1a1a;
   cursor: pointer;
   transition: border-color 0.25s;
+  touch-action: manipulation;
 }
 button:hover {
   border-color: #646cff;
@@ -72,22 +83,99 @@ button:focus-visible {
   }
 }
 
+/* Desktop-only hover lift for tabs */
+@media (hover: hover) and (pointer: fine) {
+  .tab-hover-lift:hover {
+    transform: translateY(-1px);
+  }
+}
+
+/* ---- Touch device polish (phones + iPads) ---- */
+@media (pointer: coarse) {
+  .mantine-ActionIcon-root {
+    min-width: var(--touch-min);
+    min-height: var(--touch-min);
+  }
+
+  .mantine-Tabs-tab {
+    min-height: var(--touch-min);
+    padding-inline: 14px;
+  }
+
+  .mantine-SegmentedControl-label {
+    min-height: var(--touch-min);
+  }
+
+  .task-card-complete-btn {
+    min-height: var(--touch-min) !important;
+    font-size: 0.95rem !important;
+  }
+
+  .task-card-checkbox-hit {
+    min-width: var(--touch-min);
+    min-height: var(--touch-min);
+  }
+}
+
+/* ---- PIN modal (mobile / iPad) ---- */
+.pin-modal-content {
+  padding-bottom: calc(24px + var(--safe-bottom)) !important;
+}
+
+.pin-modal-inner {
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+@media (pointer: coarse) {
+  .pin-modal-content {
+    max-width: min(420px, calc(100vw - 24px)) !important;
+  }
+
+  .pin-pad-btn {
+    min-height: 76px !important;
+    font-size: 2rem !important;
+  }
+
+  .pin-modal-actions .mantine-Button-root {
+    min-height: var(--touch-min);
+    min-width: 96px;
+    font-size: 1rem;
+  }
+}
+
+@media (max-width: 36em) {
+  .pin-modal-inner {
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+  }
+}
+
+.pin-pad-btn {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pin-pad-btn:active {
+  transform: scale(0.96);
+}
+
 /* ---- Mantine Modal safety overrides ---- */
-.mantine-Modal-inner { 
-  z-index: 10000 !important;   /* above sticky left panel/header */
+.mantine-Modal-inner {
+  z-index: 10000 !important;
 }
 
 .mantine-Modal-content {
-  opacity: 1 !important;       /* kill any stuck animation */
+  opacity: 1 !important;
   transform: none !important;
   visibility: visible !important;
-  background: var(--mantine-color-body, #fff) !important; /* force a solid panel */
+  background: var(--mantine-color-body, #fff) !important;
   color: var(--mantine-color-text, #111) !important;
   box-shadow: var(--mantine-shadow-md, 0 10px 30px rgba(0,0,0,.15)) !important;
 }
 
-/* Paper is the underlying element used inside Modal. Make sure generic utility
-   classes don't accidentally override it to transparent. */
 .mantine-Paper-root {
   background: var(--mantine-color-body, #fff) !important;
   color: var(--mantine-color-text, #111) !important;
@@ -95,4 +183,14 @@ button:focus-visible {
 
 .mantine-Combobox-dropdown {
   z-index: 11000 !important;
+}
+
+/* Prevent iOS zoom on focused inputs (font-size >= 16px) */
+@media (pointer: coarse) {
+  .mantine-TextInput-input,
+  .mantine-NumberInput-input,
+  .mantine-Select-input,
+  .mantine-Textarea-input {
+    font-size: 16px !important;
+  }
 }
