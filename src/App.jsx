@@ -136,6 +136,60 @@ function getTimeBlockLabelFromLists(blocks, id) {
   return b ? `${b.name} (${b.start}–${b.end})` : id;
 }
 
+// Returns the ISO date (YYYY-MM-DD) of the Monday of the week containing dateISO.
+// Used as the submission key for weekly checklists so completions persist through
+// the week and naturally reset each Monday (a new Monday key = a fresh list).
+function weekAnchorISO(dateISO) {
+  try {
+    const [y, m, d] = dateISO.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+    const dow = dt.getUTCDay(); // 0 = Sunday .. 6 = Saturday
+    const daysSinceMonday = (dow + 6) % 7;
+    dt.setUTCDate(dt.getUTCDate() - daysSinceMonday);
+    return dt.toISOString().slice(0, 10);
+  } catch {
+    return dateISO;
+  }
+}
+
+// Given a resolved tasklist and today's ISO date, returns the date key its
+// submission should be stored under (week-start for weekly lists, else today).
+function submissionDateForTasklist(tl, todayISODate) {
+  return tl?.resetCadence === "weekly" ? weekAnchorISO(todayISODate) : todayISODate;
+}
+
+// Formats a timestamp for display (e.g. "Jul 12, 3:07 PM") in the company timezone.
+function formatTimestamp(iso, tz) {
+  if (!iso) return "—";
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: tz || undefined,
+    }).format(new Date(iso));
+  } catch {
+    return "—";
+  }
+}
+
+// Human-readable elapsed time between two timestamps (e.g. "2h 15m", "3d 4h").
+function formatElapsed(fromISO, toISO) {
+  if (!fromISO || !toISO) return null;
+  const ms = new Date(toISO).getTime() - new Date(fromISO).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "under 1 min";
+  if (mins < 60) return `${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  const remMin = mins % 60;
+  if (hrs < 24) return remMin ? `${hrs}h ${remMin}m` : `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  const remHrs = hrs % 24;
+  return remHrs ? `${days}d ${remHrs}h` : `${days}d`;
+}
+
 /** ---------------------- Theme toggle (prop-driven) ---------------------- */
 function ThemeToggle({ scheme, setScheme }) {
   const next = scheme === "dark" ? "light" : "dark";
@@ -905,6 +959,11 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
                 >
                   {task.title}
                 </Text>
+                {task.description ? (
+                  <Text size="sm" c="dimmed" style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+                    {task.description}
+                  </Text>
+                ) : null}
                 <Text size="sm" c="dimmed">
                   {task.inputType === "number" ? "Numeric Entry" : task.inputType === "text" ? "Text Response" : "Checklist"} • {tasklist?.name || "Task"}
                 </Text>
@@ -1362,7 +1421,7 @@ function EmployeeView({
             return { ok: false, error: 'Wrong PIN. Please try again.' };
           }
 
-          const dateISO = todayISOInTz(company.timezone || 'UTC');
+          const today = todayISOInTz(company.timezone || 'UTC');
           
           // 2) Group tasks by tasklist to batch submission creation
           const tasksByTasklist = new Map();
@@ -1377,13 +1436,13 @@ function EmployeeView({
           const completionPromises = [];
           
           for (const { tasklist, tasks } of tasksByTasklist.values()) {
-            // Find/create submission for this tasklist
+            // Find/create submission for this tasklist (weekly lists key off week-start)
             const submissionId = await findOrCreateSubmission({
               supabase,
               companyId: company.id,
               tasklistId: tasklist.id,
               locationId: tasklist.locationId,
-              dateISO,
+              dateISO: submissionDateForTasklist(tasklist, today),
             });
 
             // Update parent submission with submitted_by
@@ -1430,7 +1489,7 @@ function EmployeeView({
                 companyId: company.id,
                 tasklistId: tasklist.id,
                 locationId: tasklist.locationId,
-                dateISO
+                dateISO: submissionDateForTasklist(tasklist, today)
               }).then(({ tasks }) => {
                 const byId = new Map(tasks.map(r => [r.task_id, r]));
                 return { tasklist, byId };
@@ -1891,6 +1950,12 @@ function EmployeeView({
                             <Text c="dimmed" size="sm">
                               Qty: {r.quantity} • Urgency: {r.urgency}
                             </Text>
+                            <Text c="dimmed" size="xs">
+                              Requested: {formatTimestamp(r.created_at, company?.timezone)}
+                              {formatElapsed(r.created_at, new Date().toISOString())
+                                ? ` • Waiting ${formatElapsed(r.created_at, new Date().toISOString())}`
+                                : ""}
+                            </Text>
                             {r.notes && <Text c="dimmed" size="sm">{r.notes}</Text>}
                           </div>
                         </Group>
@@ -1952,12 +2017,25 @@ function EmployeeView({
                           <Text c="dimmed" size="sm">
                             Qty: {r.quantity} • Urgency: {r.urgency}
                           </Text>
+                          <Text c="dimmed" size="xs">
+                            Requested: {formatTimestamp(r.created_at, company?.timezone)}
+                          </Text>
                           {r.notes && <Text c="dimmed" size="sm">{r.notes}</Text>}
                         </div>
                       </Group>
-                      <Text c="dimmed" size="sm">
-                        Fulfilled by: {(employees || []).find(u => String(u.id) === String(r.fulfilled_by))?.display_name || r.fulfilled_by || '—'}
-                      </Text>
+                      <Stack gap={2} align="flex-end" style={{ textAlign: "right" }}>
+                        <Text c="dimmed" size="sm">
+                          Fulfilled by: {(employees || []).find(u => String(u.id) === String(r.fulfilled_by))?.display_name || r.fulfilled_by || '—'}
+                        </Text>
+                        <Text c="dimmed" size="xs">
+                          Fulfilled: {formatTimestamp(r.fulfilled_at, company?.timezone)}
+                        </Text>
+                        {formatElapsed(r.created_at, r.fulfilled_at) && (
+                          <Badge size="sm" variant="light" color="green">
+                            Fulfilled in {formatElapsed(r.created_at, r.fulfilled_at)}
+                          </Badge>
+                        )}
+                      </Stack>
                     </Group>
                   </Card>
                 );
@@ -2002,8 +2080,9 @@ function resolveTasklistsForDayFromLists({ timeBlocks, templates }, locationId, 
   const todays = (templates || []).filter(t =>
     (t.active !== false) &&
     t.locationId === locationId &&
-    Array.isArray(t.recurrence) &&
-    t.recurrence.includes(dow)
+    // Weekly checklists stay available every day (they reset each Monday, not daily).
+    // Daily checklists only show on their scheduled weekdays.
+    (t.resetCadence === "weekly" || (Array.isArray(t.recurrence) && t.recurrence.includes(dow)))
   );
   const list = todays.map(tpl => ({
     id: tpl.id,
@@ -2011,10 +2090,12 @@ function resolveTasklistsForDayFromLists({ timeBlocks, templates }, locationId, 
     name: tpl.name,
     timeBlockId: tpl.timeBlockId,
     recurrence: tpl.recurrence || [],
+    resetCadence: tpl.resetCadence === "weekly" ? "weekly" : "daily",
     requiresApproval: tpl.requiresApproval !== false,
     signoffMethod: tpl.signoffMethod || "PIN",
     tasks: (tpl.tasks || []).map(t => ({
       id: t.id, title: t.title, category: t.category || "",
+      description: t.description || "",
       inputType: t.inputType || "checkbox",
       min: t.min ?? null, max: t.max ?? null,
       photoRequired: !!t.photoRequired,
@@ -3492,7 +3573,7 @@ function AppInner() {
     let cancelled = false;
 
     const processWorkingState = async () => {
-      const dateISO = todayISOInTz(company.timezone || 'UTC');
+      const today = todayISOInTz(company.timezone || 'UTC');
 
       // fetch all current tasklists' server state in parallel
       const results = await Promise.all(
@@ -3502,7 +3583,7 @@ function AppInner() {
             companyId: company.id,
             tasklistId: tl.id,
             locationId: tl.locationId,
-            dateISO
+            dateISO: submissionDateForTasklist(tl, today)
           }).then(r => ({ tl, ...r }))
         )
       );
@@ -3617,8 +3698,8 @@ function AppInner() {
             return { ok: false, error: 'Wrong PIN. Please try again.' };
           }
 
-          // 2) Find/create submission for today
-          const dateISO = todayISOInTz(company.timezone || 'UTC');
+          // 2) Find/create submission for the correct period (weekly lists key off week-start)
+          const dateISO = submissionDateForTasklist(tasklist, todayISOInTz(company.timezone || 'UTC'));
           const submissionId = await findOrCreateSubmission({
             supabase,
             companyId: company.id,
@@ -3683,7 +3764,7 @@ function AppInner() {
         file
       });
 
-      const dateISO = todayISOInTz(company.timezone || 'UTC');
+      const dateISO = submissionDateForTasklist(tasklist, todayISOInTz(company.timezone || 'UTC'));
       const submissionId = await findOrCreateSubmission({
         supabase, companyId: company.id, tasklistId: tasklist.id, locationId: tasklist.locationId, dateISO
       });
@@ -3751,20 +3832,40 @@ function AppInner() {
             return { ok: false, error: 'Wrong PIN. Please try again.' };
           }
 
+          // Persist the sign-off to the database so it survives refresh / overnight.
+          const dateISO = submissionDateForTasklist(tl, todayISOInTz(company.timezone || 'UTC'));
+          const submissionId = await findOrCreateSubmission({
+            supabase,
+            companyId: company.id,
+            tasklistId: tl.id,
+            locationId: tl.locationId,
+            dateISO,
+          });
+          const { error: signErr } = await supabase
+            .from('submission')
+            .update({
+              status: 'Pending',
+              signed_by: user.id,
+              submitted_by: user.id,
+            })
+            .eq('id', submissionId)
+            .eq('company_id', company.id);
+          if (signErr) throw signErr;
+
           const payload = (working[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" }));
           const submission = {
-            id: `ci_${Date.now()}`,
+            id: submissionId,
             tasklistId: tl.id,
             tasklistName: tl.name,
             locationId: tl.locationId,
-            date: todayISO(),
+            date: dateISO,
             status: "Pending",
-            signedBy: `PIN-${pin}`,
+            signedBy: user.display_name || `PIN user`,
             submittedBy: currentEmployee,
             signedAt: new Date().toISOString(),
             tasks: payload,
           };
-          setSubmissions((prev) => [submission, ...prev]);
+          setSubmissions((prev) => [submission, ...prev.filter((s) => s.id !== submissionId)]);
           setWorking((prev) => ({
             ...prev,
             [tl.id]: (prev[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" })),

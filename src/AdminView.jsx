@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import {
-  Card, Stack, Group, Text, Button, TextInput, ColorInput, Select, MultiSelect,
+  Card, Stack, Group, Text, Button, TextInput, Textarea, ColorInput, Select, MultiSelect,
   NumberInput, Switch, FileButton, Badge, Table, ScrollArea, Divider,
   NavLink, Grid, Modal, ActionIcon, Drawer, Burger, rem
 } from "@mantine/core";
@@ -1059,6 +1059,7 @@ function ChecklistsPane({
   const [createTplOpen, setCreateTplOpen] = useState(false);
   const [editTplOpen, setEditTplOpen] = useState(false);
   const [tplDraft, setTplDraft] = useState(initTemplateDraft());
+  const [savingTpl, setSavingTpl] = useState(false);
 
   // search state for positions MultiSelect (template dialog)
   const [posSearchTpl, setPosSearchTpl] = useState("");
@@ -1074,6 +1075,7 @@ function ChecklistsPane({
       locationId: locations?.[0]?.id || "",
       timeBlockId: timeBlocks?.[0]?.id || "",
       recurrence: [0, 1, 2, 3, 4, 5, 6],
+      resetCadence: "daily",
       positions: [],
       tasks: [],
     };
@@ -1397,6 +1399,25 @@ function ChecklistsPane({
                   }}
                 />
 
+                <Select
+                  label="Reset schedule"
+                  description={
+                    tplDraft.resetCadence === "weekly"
+                      ? "Available all week; check-offs stay until it resets Monday."
+                      : "Resets every day."
+                  }
+                  data={[
+                    { value: "daily", label: "Daily (resets every day)" },
+                    { value: "weekly", label: "Weekly (resets each Monday)" },
+                  ]}
+                  value={tplDraft.resetCadence || "daily"}
+                  onChange={(v) => setTplDraft({ ...tplDraft, resetCadence: v || "daily" })}
+                  comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+                  allowDeselect={false}
+                />
+              </Group>
+
+              {tplDraft.resetCadence !== "weekly" && (
                 <MultiSelect
                   label="Days of Week"
                   placeholder="Select days"
@@ -1413,7 +1434,7 @@ function ChecklistsPane({
                   onChange={(arr) => setTplDraft({ ...tplDraft, recurrence: (arr || []).map(x => Number(x)) })}
                   required
                 />
-              </Group>
+              )}
 
               <Divider label="Tasks" labelPosition="left" />
               
@@ -1426,14 +1447,24 @@ function ChecklistsPane({
 
               <Group justify="flex-end" mt="lg">
                 <Button
-                  onClick={() => {
-                    if (!tplDraft.name.trim() || !tplDraft.locationId || !tplDraft.timeBlockId || tplDraft.recurrence.length === 0) {
+                  loading={savingTpl}
+                  onClick={async () => {
+                    const isWeekly = tplDraft.resetCadence === "weekly";
+                    if (!tplDraft.name.trim() || !tplDraft.locationId || !tplDraft.timeBlockId || (!isWeekly && tplDraft.recurrence.length === 0)) {
                       alert("Template name, location, time block, and at least one day are required.");
                       return;
                     }
-                    saveTemplateToDb(tplDraft, createTplOpen ? "create" : "update");
-                    setCreateTplOpen(false);
-                    setEditTplOpen(false);
+                    setSavingTpl(true);
+                    try {
+                      await saveTemplateToDb(tplDraft, createTplOpen ? "create" : "update");
+                      setCreateTplOpen(false);
+                      setEditTplOpen(false);
+                    } catch (e) {
+                      console.error("Failed to save template:", e);
+                      alert(`Could not save template: ${e?.message || e}. Your changes were NOT saved. Please try again.`);
+                    } finally {
+                      setSavingTpl(false);
+                    }
                   }}
                   leftSection={<IconDeviceFloppy size={16} />}
                 >
@@ -1454,6 +1485,7 @@ function TaskEditor({ tasks, onAdd, onChange, onRemove }) {
   const [draft, setDraft] = useState({
     title: "",
     category: "",
+    description: "",
     inputType: "checkbox", // 'checkbox' | 'number' | 'text'
     min: null,
     max: null,
@@ -1467,6 +1499,7 @@ function TaskEditor({ tasks, onAdd, onChange, onRemove }) {
     setDraft({
       title: "",
       category: "",
+      description: "",
       inputType: "checkbox",
       min: null,
       max: null,
@@ -1497,7 +1530,18 @@ function TaskEditor({ tasks, onAdd, onChange, onRemove }) {
           {tasks.map(t => (
             <Table.Tr key={t.id}>
               <Table.Td>
-                <TextInput value={t.title} onChange={(e) => onChange(t.id, { title: e.target.value })} />
+                <Stack gap={4}>
+                  <TextInput value={t.title} onChange={(e) => onChange(t.id, { title: e.target.value })} />
+                  <Textarea
+                    placeholder="Description (optional instructions shown to staff)"
+                    value={t.description || ""}
+                    onChange={(e) => onChange(t.id, { description: e.target.value })}
+                    autosize
+                    minRows={1}
+                    maxRows={4}
+                    size="xs"
+                  />
+                </Stack>
               </Table.Td>
               <Table.Td className="hide-sm">
                 <TextInput value={t.category || ""} onChange={(e) => onChange(t.id, { category: e.target.value })} />
@@ -1536,6 +1580,16 @@ function TaskEditor({ tasks, onAdd, onChange, onRemove }) {
 
       <Card withBorder radius="md" className="u-card">
         <Text fw={600} mb="xs">Add task</Text>
+        <Textarea
+          label="Description"
+          placeholder="Optional instructions shown to staff for this task"
+          value={draft.description}
+          onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+          autosize
+          minRows={1}
+          maxRows={4}
+          mb="xs"
+        />
         <Group align="flex-end" gap="xs" wrap="wrap">
           <TextInput label="Title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} style={{ minWidth: rem(220) }} />
           <TextInput label="Category" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} />

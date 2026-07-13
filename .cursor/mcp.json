@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "supabase-sop-checklist": {
+      "url": "https://mcp.supabase.com/mcp?project_ref=amtkigmagpjamlctdopz",
+      "headers": {}
+    }
+  }
+}

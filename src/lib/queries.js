@@ -240,6 +240,7 @@ const toDbTimeBlock = async (tb) => {
 
 const toUiTask = (r) => ({
   id: r.id, title: r.title, category: r.category || "",
+  description: r.description || "",
   inputType: r.input_type || "checkbox",
   min: r.min ?? null, max: r.max ?? null,
   photoRequired: !!r.photo_required,
@@ -250,6 +251,7 @@ const toUiTask = (r) => ({
 const toDbTask = (t, tasklist_id) => ({
   id: t.id, tasklist_id,
   title: t.title, category: t.category || null,
+  description: t.description?.trim() ? t.description.trim() : null,
   input_type: t.inputType || "checkbox",
   min: t.min, max: t.max,
   photo_required: !!t.photoRequired,
@@ -262,6 +264,7 @@ const toUiTemplate = (r) => ({
   locationId: r.location_id,
   timeBlockId: r.time_block_id,
   recurrence: r.recurrence || [],
+  resetCadence: r.reset_cadence === "weekly" ? "weekly" : "daily",
   requiresApproval: r.requires_approval ?? true,
   signoffMethod: r.signoff_method || "PIN",
   active: r.active !== false,
@@ -339,6 +342,7 @@ export async function upsertTasklistTemplateWithTasks(tplUi) {
     location_id: tplUi.locationId,
     time_block_id: tplUi.timeBlockId,
     recurrence: tplUi.recurrence || [],
+    reset_cadence: tplUi.resetCadence === "weekly" ? "weekly" : "daily",
     requires_approval: tplUi.requiresApproval ?? true,
     signoff_method: tplUi.signoffMethod || "PIN",
     active: tplUi.active !== false,

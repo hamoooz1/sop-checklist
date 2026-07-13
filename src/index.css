@@ -16,6 +16,9 @@
 html {
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
+  /* Disable double-tap-to-zoom (e.g. tapping fast on the PIN pad) while
+     keeping normal scrolling and pinch-to-zoom. */
+  touch-action: manipulation;
 }
 
 /* collapse table columns on small screens */
@@ -43,6 +46,7 @@ body {
   min-height: 100dvh;
   display: block;
   overscroll-behavior-y: none;
+  touch-action: manipulation;
 }
 
 h1 {
