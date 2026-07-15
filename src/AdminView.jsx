@@ -1341,7 +1341,8 @@ function ChecklistsPane({
             onClose={() => { setCreateTplOpen(false); setEditTplOpen(false); }}
             title={createTplOpen ? "Create Template" : "Edit Template"}
             centered
-            size="xl"
+            size="min(1100px, 95vw)"
+            scrollAreaComponent={ScrollArea.Autosize}
           >
             <Stack gap="md">
               <TextInput 
@@ -1514,69 +1515,84 @@ function TaskEditor({ tasks, onAdd, onChange, onRemove }) {
     <Stack gap="sm">
       <Text fw={600}>Tasks</Text>
 
-      <Table withColumnBorders={false} highlightOnHover>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Title</Table.Th>
-            <Table.Th className="hide-sm">Category</Table.Th>
-            <Table.Th>Type</Table.Th>
-            <Table.Th className="hide-sm">Range</Table.Th>
-            <Table.Th className="hide-sm">Rules</Table.Th>
-            <Table.Th>Priority</Table.Th>
-            <Table.Th></Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {tasks.map(t => (
-            <Table.Tr key={t.id}>
-              <Table.Td>
-                <Stack gap={4}>
-                  <TextInput value={t.title} onChange={(e) => onChange(t.id, { title: e.target.value })} />
-                  <Textarea
-                    placeholder="Description (optional instructions shown to staff)"
-                    value={t.description || ""}
-                    onChange={(e) => onChange(t.id, { description: e.target.value })}
-                    autosize
-                    minRows={1}
-                    maxRows={4}
-                    size="xs"
-                  />
-                </Stack>
-              </Table.Td>
-              <Table.Td className="hide-sm">
-                <TextInput value={t.category || ""} onChange={(e) => onChange(t.id, { category: e.target.value })} />
-              </Table.Td>
-              <Table.Td>
-                <Select
-                  value={t.inputType}
-                  onChange={(v) => onChange(t.id, { inputType: v })}
-                  data={["checkbox", "number", "text"].map(x => ({ value: x, label: x }))}
-                  comboboxProps={{ withinPortal: true, zIndex: 11000 }}
-                />
-              </Table.Td>
-              <Table.Td className="hide-sm">
-                <Group gap="xs" wrap="nowrap">
-                  <NumberInput placeholder="min" value={t.min ?? ""} onChange={(v) => onChange(t.id, { min: v === "" ? null : Number(v) })} style={{ width: rem(90) }} />
-                  <NumberInput placeholder="max" value={t.max ?? ""} onChange={(v) => onChange(t.id, { max: v === "" ? null : Number(v) })} style={{ width: rem(90) }} />
-                </Group>
-              </Table.Td>
-              <Table.Td className="hide-sm">
-                <Group gap="xs">
-                  <Switch label="Photo" checked={!!t.photoRequired} onChange={(e) => onChange(t.id, { photoRequired: e.currentTarget.checked })} />
-                  <Switch label="Note" checked={!!t.noteRequired} onChange={(e) => onChange(t.id, { noteRequired: e.currentTarget.checked })} />
-                  <Switch label="N/A" checked={!!t.allowNA} onChange={(e) => onChange(t.id, { allowNA: e.currentTarget.checked })} />
-                </Group>
-              </Table.Td>
-              <Table.Td>
-                <NumberInput min={1} max={5} value={t.priority ?? 3} onChange={(v) => onChange(t.id, { priority: Number(v) || 3 })} style={{ width: rem(80) }} />
-              </Table.Td>
-              <Table.Td>
-                <ActionIcon color="red" variant="subtle" onClick={() => onRemove(t.id)} title="Remove"><IconTrash size={16} /></ActionIcon>
-              </Table.Td>
+      <ScrollArea type="auto" offsetScrollbars scrollbarSize={8}>
+        <Table withColumnBorders={false} highlightOnHover verticalSpacing="sm" style={{ minWidth: rem(980), tableLayout: "fixed" }}>
+          <colgroup>
+            {[
+              <col key="c-title" style={{ width: rem(300) }} />,
+              <col key="c-cat" style={{ width: rem(150) }} />,
+              <col key="c-type" style={{ width: rem(130) }} />,
+              <col key="c-range" style={{ width: rem(190) }} />,
+              <col key="c-rules" style={{ width: rem(120) }} />,
+              <col key="c-prio" style={{ width: rem(90) }} />,
+              <col key="c-actions" style={{ width: rem(48) }} />,
+            ]}
+          </colgroup>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Title</Table.Th>
+              <Table.Th>Category</Table.Th>
+              <Table.Th>Type</Table.Th>
+              <Table.Th>Range</Table.Th>
+              <Table.Th>Rules</Table.Th>
+              <Table.Th>Priority</Table.Th>
+              <Table.Th></Table.Th>
             </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
+          </Table.Thead>
+          <Table.Tbody>
+            {tasks.map(t => (
+              <Table.Tr key={t.id}>
+                <Table.Td style={{ verticalAlign: "top" }}>
+                  <Stack gap={4}>
+                    <TextInput value={t.title} onChange={(e) => onChange(t.id, { title: e.target.value })} w="100%" />
+                    <Textarea
+                      placeholder="Description (optional instructions shown to staff)"
+                      value={t.description || ""}
+                      onChange={(e) => onChange(t.id, { description: e.target.value })}
+                      autosize
+                      minRows={1}
+                      maxRows={4}
+                      size="xs"
+                      w="100%"
+                    />
+                  </Stack>
+                </Table.Td>
+                <Table.Td style={{ verticalAlign: "top" }}>
+                  <TextInput value={t.category || ""} onChange={(e) => onChange(t.id, { category: e.target.value })} w="100%" />
+                </Table.Td>
+                <Table.Td style={{ verticalAlign: "top" }}>
+                  <Select
+                    value={t.inputType}
+                    onChange={(v) => onChange(t.id, { inputType: v })}
+                    data={["checkbox", "number", "text"].map(x => ({ value: x, label: x }))}
+                    comboboxProps={{ withinPortal: true, zIndex: 11000 }}
+                    w="100%"
+                  />
+                </Table.Td>
+                <Table.Td style={{ verticalAlign: "top" }}>
+                  <Group gap="xs" wrap="nowrap">
+                    <NumberInput placeholder="min" value={t.min ?? ""} onChange={(v) => onChange(t.id, { min: v === "" ? null : Number(v) })} style={{ flex: 1, minWidth: 0 }} />
+                    <NumberInput placeholder="max" value={t.max ?? ""} onChange={(v) => onChange(t.id, { max: v === "" ? null : Number(v) })} style={{ flex: 1, minWidth: 0 }} />
+                  </Group>
+                </Table.Td>
+                <Table.Td style={{ verticalAlign: "top" }}>
+                  <Stack gap={4}>
+                    <Switch label="Photo" checked={!!t.photoRequired} onChange={(e) => onChange(t.id, { photoRequired: e.currentTarget.checked })} />
+                    <Switch label="Note" checked={!!t.noteRequired} onChange={(e) => onChange(t.id, { noteRequired: e.currentTarget.checked })} />
+                    <Switch label="N/A" checked={!!t.allowNA} onChange={(e) => onChange(t.id, { allowNA: e.currentTarget.checked })} />
+                  </Stack>
+                </Table.Td>
+                <Table.Td style={{ verticalAlign: "top" }}>
+                  <NumberInput min={1} max={5} value={t.priority ?? 3} onChange={(v) => onChange(t.id, { priority: Number(v) || 3 })} w="100%" />
+                </Table.Td>
+                <Table.Td style={{ verticalAlign: "top" }}>
+                  <ActionIcon color="red" variant="subtle" onClick={() => onRemove(t.id)} title="Remove"><IconTrash size={16} /></ActionIcon>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      </ScrollArea>
 
       <Card withBorder radius="md" className="u-card">
         <Text fw={600} mb="xs">Add task</Text>
