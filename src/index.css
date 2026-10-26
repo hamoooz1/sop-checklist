@@ -66,8 +66,10 @@ button {
   transition: border-color 0.25s;
   touch-action: manipulation;
 }
-button:hover {
-  border-color: #646cff;
+@media (hover: hover) and (pointer: fine) {
+  button:hover {
+    border-color: #646cff;
+  }
 }
 button:focus,
 button:focus-visible {
@@ -96,6 +98,16 @@ button:focus-visible {
 
 /* ---- Touch device polish (phones + iPads) ---- */
 @media (pointer: coarse) {
+  .mantine-Button-root,
+  .mantine-ActionIcon-root,
+  .mantine-UnstyledButton-root,
+  .mantine-Switch-track,
+  .mantine-SegmentedControl-label,
+  .mantine-NavLink-root,
+  .mantine-Tabs-tab {
+    touch-action: manipulation;
+  }
+
   .mantine-ActionIcon-root {
     min-width: var(--touch-min);
     min-height: var(--touch-min);

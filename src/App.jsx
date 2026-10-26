@@ -22,7 +22,7 @@ import {
   IconChevronDown, IconChevronRight, IconListCheck, IconShoppingCart
 } from "@tabler/icons-react";
 import { getMyCompanyId } from "./lib/company"; // [COMPANY_SCOPE]
-import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates, listRestockRequests, completeRestockRequest } from "./lib/queries.js";
+import fetchUsers, { fetchLocations, getCompany, listTimeBlocks, listTasklistTemplates, listDetachedTasks, listRestockRequests, completeRestockRequest } from "./lib/queries.js";
 import BugReport from "./components/BugReport.jsx";
 import RestockRequestForm from "./components/restock/RestockRequestForm.jsx";
 
@@ -56,6 +56,28 @@ function useDebouncedCallback(callback, delay) {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(() => callbackRef.current(...args), delay);
   }, [delay]);
+}
+
+// Touch browsers delay click until they decide the gesture is not a scroll.
+// Fire the action on pointerdown for fingers, and ignore that same tap's late click.
+function fastPress(handler) {
+  return {
+    onPointerDown: (event) => {
+      if (event.pointerType === "mouse" || event.button > 0) return;
+      const el = event.currentTarget;
+      if (!el || el.disabled || el.getAttribute("aria-disabled") === "true" || el.dataset.disabled === "true") return;
+      event.preventDefault();
+      event.stopPropagation();
+      el.dataset.touchFired = String(Date.now());
+      handler(event);
+    },
+    onClick: (event) => {
+      event.stopPropagation();
+      const fired = Number(event.currentTarget?.dataset?.touchFired || 0);
+      if (fired && Date.now() - fired < 700) return;
+      handler(event);
+    },
+  };
 }
 
 function PhotoThumbs({ urls = [], size = 64, title = "Photo" }) {
@@ -271,18 +293,25 @@ const PinButton = React.memo(function PinButton({ value, label, styles, disabled
   const handlePointerDown = useCallback((e) => {
     if (disabled) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    // Don't capture the pointer. On iPad that sticks and the next digit waits.
     e.preventDefault();
     e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
+    e.currentTarget.style.transform = 'scale(0.96)';
     hapticTap();
     onPress(value);
   }, [disabled, onPress, value]);
+
+  const releasePress = useCallback((e) => {
+    e.currentTarget.style.transform = '';
+  }, []);
 
   return (
     <Button
       type="button"
       className="pin-pad-btn"
       onPointerDown={handlePointerDown}
+      onPointerUp={releasePress}
+      onPointerCancel={releasePress}
       onClick={(e) => e.preventDefault()}
       disabled={disabled}
       fullWidth
@@ -501,7 +530,7 @@ const PinDialog = React.memo(function PinDialog({ opened, onClose, onConfirm }) 
       withCloseButton={false}
       closeOnClickOutside={false}
       closeOnEscape={!loading}
-      transitionProps={{ duration: 120 }}
+      transitionProps={{ duration: 0 }}
       styles={{
         content: {
           maxWidth: isCoarsePointer ? 420 : 360,
@@ -600,7 +629,7 @@ const PinDialog = React.memo(function PinDialog({ opened, onClose, onConfirm }) 
           </Button>
           <Button
             type="button"
-            onClick={handleConfirm}
+            {...fastPress(handleConfirm)}
             disabled={pin.length === 0 || loading}
             loading={loading}
             styles={{
@@ -691,7 +720,7 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
           <Group gap="sm" align="center">
             <ActionIcon
               variant="subtle"
-              onClick={() => setIsExpanded(!isExpanded)}
+              {...fastPress(() => setIsExpanded((open) => !open))}
               aria-label={isExpanded ? 'Collapse group' : 'Expand group'}
               size="xl"
               style={{ minWidth: 44, minHeight: 44, touchAction: 'manipulation' }}
@@ -740,7 +769,7 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
             {/* Sign & Submit button integrated into header */}
             {groupBy === 'timeblock' && (
               <Button 
-                onClick={() => signoff(tasklist)} 
+                {...fastPress(() => signoff(tasklist))}
                 disabled={!canSubmit}
                 size="sm"
                 variant={canSubmit ? "filled" : "outline"}
@@ -771,10 +800,10 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
                     isComplete={isComplete}
                     canComplete={canComplete}
                     opened={opened}
-                    onToggle={() => onToggleTask(tasklist.id, task.id)}
-                    onUpdate={(patch) => updateTaskState(tasklist.id, task.id, patch)}
-                    onComplete={() => handleComplete(tasklist, task)}
-                    onUpload={(file) => handleUpload(tasklist, task, file)}
+                    onToggleTask={onToggleTask}
+                    updateTaskState={updateTaskState}
+                    handleComplete={handleComplete}
+                    handleUpload={handleUpload}
                     isSelected={isSelected}
                     onSelectChange={onSelectChange}
                     tasklist={tasklist}
@@ -789,7 +818,22 @@ function TaskGroup({ title, tasks, tasklist, states, onToggleTask, isTaskOpen, u
   );
 }
 
-function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUpdate, onComplete, onUpload, isSelected, onSelectChange, tasklist }) {
+function taskStateEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.status === b.status
+    && a.na === b.na
+    && a.note === b.note
+    && a.value === b.value
+    && a.reviewStatus === b.reviewStatus
+    && (a.photos?.length || 0) === (b.photos?.length || 0);
+}
+
+const TaskCard = React.memo(function TaskCard({ task, state, isComplete, canComplete, opened, onToggleTask, updateTaskState, handleComplete, handleUpload, isSelected, onSelectChange, tasklist }) {
+  const onToggle = () => onToggleTask(tasklist.id, task.id);
+  const onUpdate = (patch) => updateTaskState(tasklist.id, task.id, patch);
+  const onComplete = () => handleComplete(tasklist, task);
+  const onUpload = (file) => handleUpload(tasklist, task, file);
   const { colorScheme } = useMantineColorScheme();
   const computed = useComputedColorScheme('light');
   const isDark = computed === 'dark';
@@ -904,10 +948,7 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
               justifyContent: 'center',
               flexShrink: 0,
             }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelectChange(tasklist.id, task.id, !isSelected);
-            }}
+            {...fastPress(() => onSelectChange(tasklist.id, task.id, !isSelected))}
             role="button"
             aria-label={`Select task: ${task.title}`}
             aria-pressed={!!isSelected}
@@ -936,7 +977,7 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
             <Group align="flex-start" gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
               <ActionIcon 
                 variant="subtle" 
-                onClick={(e) => { e.stopPropagation(); onToggle(); }}
+                {...fastPress(onToggle)}
                 aria-label={opened ? 'Collapse task details' : 'Expand task details'}
                 size="xl"
                 style={{ flexShrink: 0, minWidth: 44, minHeight: 44, touchAction: 'manipulation' }}
@@ -947,7 +988,7 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
               <Stack
                 gap={2}
                 style={{ minWidth: 0, flex: 1, cursor: 'pointer', touchAction: 'manipulation' }}
-                onClick={(e) => { e.stopPropagation(); onToggle(); }}
+                {...fastPress(onToggle)}
                 role="button"
                 aria-expanded={opened}
               >
@@ -1055,7 +1096,7 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
                 variant={isComplete ? "light" : "gradient"}
                 gradient={isComplete ? undefined : { from: 'blue', to: 'cyan' }}
                 color={isComplete ? "green" : undefined}
-                onClick={(e) => { e.stopPropagation(); onComplete(); }}
+                {...fastPress(onComplete)}
                 disabled={!canComplete || isComplete}
                 size="md"
                 fw={600}
@@ -1119,7 +1160,7 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
               className="task-card-complete-btn"
               variant={isComplete ? "outline" : "default"}
               color={isComplete ? "green" : undefined}
-              onClick={(e) => { e.stopPropagation(); onComplete(); }}
+              {...fastPress(onComplete)}
               disabled={!canComplete || isComplete}
               fullWidth
               size="md"
@@ -1140,10 +1181,23 @@ function TaskCard({ task, state, isComplete, canComplete, opened, onToggle, onUp
       </Collapse>
     </Paper>
   );
-}
+}, (prev, next) => (
+  prev.task === next.task
+  && prev.tasklist === next.tasklist
+  && prev.opened === next.opened
+  && prev.isSelected === next.isSelected
+  && prev.isComplete === next.isComplete
+  && prev.canComplete === next.canComplete
+  && prev.onToggleTask === next.onToggleTask
+  && prev.updateTaskState === next.updateTaskState
+  && prev.handleComplete === next.handleComplete
+  && prev.handleUpload === next.handleUpload
+  && prev.onSelectChange === next.onSelectChange
+  && taskStateEqual(prev.state, next.state)
+));
 
 /** ---------------------- Employee View ---------------------- */
-function EmployeeView({
+const EmployeeView = React.memo(function EmployeeView({
   tasklists,
   working,
   updateTaskState,
@@ -1273,14 +1327,14 @@ function EmployeeView({
   }, [company?.id, debouncedRefreshRestock]);
 
   const isTaskOpen = (tlId, taskId) => !!openTasks[`${tlId}:${taskId}`];
-  const toggleTaskOpen = (tlId, taskId) =>
+  const toggleTaskOpen = useCallback((tlId, taskId) =>
     setOpenTasks((prev) => {
       const k = `${tlId}:${taskId}`;
       return { ...prev, [k]: !prev[k] };
-    });
+    }), []);
 
   // Task selection handlers
-  const handleTaskSelect = (tasklistId, taskId, checked) => {
+  const handleTaskSelect = useCallback((tasklistId, taskId, checked) => {
     setSelectedTasks((prev) => {
       const next = new Map(prev);
       if (!next.has(tasklistId)) {
@@ -1297,9 +1351,9 @@ function EmployeeView({
       }
       return next;
     });
-  };
+  }, []);
 
-  const handleSelectAll = (tasklistId, taskIds, checked) => {
+  const handleSelectAll = useCallback((tasklistId, taskIds, checked) => {
     setSelectedTasks((prev) => {
       const next = new Map(prev);
       if (checked) {
@@ -1309,7 +1363,7 @@ function EmployeeView({
       }
       return next;
     });
-  };
+  }, []);
 
   const handleSelectAllToday = () => {
     const allSelected = tasklists.every((tl) => {
@@ -1748,7 +1802,7 @@ function EmployeeView({
                 color="green"
                 size="md"
                 leftSection={<IconCheck size={18} />}
-                onClick={handleBulkComplete}
+                {...fastPress(handleBulkComplete)}
               >
                 Complete Selected
               </Button>
@@ -1892,7 +1946,7 @@ function EmployeeView({
                     return (
                       <Button
                         key={tl.id}
-                        onClick={() => signoff(tl)}
+                        {...fastPress(() => signoff(tl))}
                         disabled={!canSubmit}
                         size="sm"
                         variant={canSubmit ? "filled" : "outline"}
@@ -1968,7 +2022,7 @@ function EmployeeView({
                             searchable
                             comboboxProps={{ withinPortal: true }}
                           />
-                          <Button variant="default" onClick={async () => {
+                          <Button variant="default" {...fastPress(async () => {
                             try {
                               const updated = await completeRestockRequest({ id: r.id, fulfilled_by: r.fulfilled_by || null });
                               setRestockList(prev => prev.map(x => x.id === r.id ? updated : x));
@@ -1978,7 +2032,7 @@ function EmployeeView({
                               console.error(e);
                               alert('Failed to complete');
                             }
-                          }}>
+                          })}>
                             Mark Completed
                           </Button>
                         </Stack>
@@ -2063,7 +2117,10 @@ function EmployeeView({
                 setWorking={setWorking}
                 getTaskMeta={(tasklistId, taskId) => {
                   const tl = tasklists.find((x) => x.id === tasklistId);
-                  return tl?.tasks.find((t) => t.id === taskId) || { title: taskId, inputType: "checkbox" };
+                  return tl?.tasks.find((t) => t.id === taskId)
+                    || (checklists.templates || []).flatMap((tpl) => tpl.tasks || []).find((t) => t.id === taskId)
+                    || (checklists.archivedTasks || []).find((t) => t.id === taskId)
+                    || { title: taskId, inputType: "checkbox" };
                 }}
                 company={company}
               />
@@ -2072,7 +2129,7 @@ function EmployeeView({
       </Card>
     </Stack>
   );
-}
+});
 
 function resolveTasklistsForDayFromLists({ timeBlocks, templates }, locationId, dateISO, tz = "UTC") {
   const dow = weekdayIndexFromISO(dateISO, tz);
@@ -2252,7 +2309,7 @@ function EmployeeReworkCard({ s, setSubmissions, setWorking, getTaskMeta, compan
                       variant={isComplete ? "outline" : "default"}
                       color={isComplete ? "green" : undefined}
                       disabled={isComplete || !canComplete}
-                      onClick={() => updateSubmissionTask(s.id, t.taskId, { status: "Complete" })}
+                      {...fastPress(() => updateSubmissionTask(s.id, t.taskId, { status: "Complete" }))}
                     >
                       {isComplete ? "Completed ✓" : "Mark Complete"}
                     </Button>
@@ -2299,7 +2356,7 @@ function ManagerView({
     let q = supabase
       .from('submission')
       .select(`
-        id, tasklist_id, location_id, date, status, signed_by, submitted_by,
+        id, tasklist_id, tasklist_name, location_id, date, status, signed_by, submitted_by,
          submission_task:submission_task (
    task_id, status, review_status, na, value, note, photos, rework_count, review_note, submitted_by
  )
@@ -2590,6 +2647,7 @@ function ManagerView({
         if (!cancelled) setSubmissions(list.map(s => ({
           id: s.id,
           tasklistId: s.tasklist_id,
+          tasklistName: s.tasklist_name || "",
           locationId: s.location_id,
           date: s.date,
           status: s.status,
@@ -2858,7 +2916,9 @@ function ManagerView({
             <Card key={s.id} withBorder radius="lg" shadow="sm" mb="sm">
               <Group justify="space-between">
                 <div>
-                  <Text fw={600}>{s.tasklistName}</Text>
+                  <Text fw={600}>
+                    {(checklists.templates || []).find((t) => t.id === s.tasklistId)?.name || s.tasklistName || "Checklist"}
+                  </Text>
                   <Text c="dimmed" fz="sm">
                     {s.date} • {locations.find((l) => String(l.id) === String(s.locationId))?.name || s.locationId} • By: {nameForUserId(s.submittedBy) || s.signedBy || "—"}
                   </Text>
@@ -3389,7 +3449,9 @@ function AppInner() {
     })();
   }, []);
 
-  const [mode, setMode] = useState("employee");
+  const [mode, setMode] = useState(() => {
+    try { return sessionStorage.getItem("sop-mode") || "employee"; } catch { return "employee"; }
+  });
   const [activeLocationId, setActiveLocationId] = useState("");
   const [locations, setLocations] = useState([]);
   const [currentEmployee, setCurrentEmployee] = useState("");
@@ -3397,13 +3459,17 @@ function AppInner() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [positionFilter, setPositionFilter] = useState("");
   const [company, setCompany] = useState({ id: "", name: "", brandColor: "#0ea5e9", logo: null, timezone: "UTC" });
-  const [checklists, setChecklists] = useState({ timeBlocks: [], templates: [], overrides: [] });
+  const [checklists, setChecklists] = useState({ timeBlocks: [], templates: [], overrides: [], archivedTasks: [] });
   const ModeTabsText = [
     { value: "employee", label: "Employee", icon: <IconUser size={14} /> },
     { value: "manager", label: "Manager", icon: <IconShieldHalf size={14} /> },
     { value: "admin", label: "Admin", icon: <IconLayoutGrid size={14} /> },
   ];
   const ModeTabsIcons = ModeTabsText.map(({ value, icon }) => ({ value, label: icon }));
+
+  useEffect(() => {
+    try { sessionStorage.setItem("sop-mode", mode); } catch { /* private mode */ }
+  }, [mode]);
 
   // GET Company from DB
   const loadCompany = useCallback(async () => {
@@ -3453,11 +3519,12 @@ function AppInner() {
   // checklists data (time blocks + templates)
   const loadChecklists = useCallback(async () => {
     if (!companyId) return;
-    const [tbs, tpls] = await Promise.all([
+    const [tbs, tpls, archivedTasks] = await Promise.all([
       listTimeBlocks(companyId),               // make sure your query is scoped
-      listTasklistTemplates(companyId)         // and returns tasks inside
+      listTasklistTemplates(companyId),        // and returns tasks inside
+      listDetachedTasks(companyId).catch(() => []),
     ]);
-    setChecklists({ timeBlocks: tbs, templates: tpls, overrides: [] });
+    setChecklists({ timeBlocks: tbs, templates: tpls, overrides: [], archivedTasks });
   }, [companyId]);
 
   useEffect(() => { loadChecklists(); }, [loadChecklists]);
@@ -3566,9 +3633,16 @@ function AppInner() {
     });
   }, [checklists, activeLocationId, company.timezone, positionFilter]);
   const restockLocationId = tasklistsToday[0]?.locationId || null;
+  const tasklistsTodayRef = useRef(tasklistsToday);
+  tasklistsTodayRef.current = tasklistsToday;
+  const tasklistSyncKey = useMemo(
+    () => tasklistsToday.map((tl) => `${tl.id}:${(tl.tasks || []).map((t) => t.id).join(",")}`).join("|"),
+    [tasklistsToday]
+  );
 
   useEffect(() => {
-    if (!company.id || !activeLocationId || tasklistsToday.length === 0) return;
+    const lists = tasklistsTodayRef.current;
+    if (!company.id || !activeLocationId || lists.length === 0) return;
 
     let cancelled = false;
 
@@ -3577,7 +3651,7 @@ function AppInner() {
 
       // fetch all current tasklists' server state in parallel
       const results = await Promise.all(
-        tasklistsToday.map(tl =>
+        lists.map(tl =>
           fetchSubmissionAndTasks({
             supabase,
             companyId: company.id,
@@ -3624,13 +3698,14 @@ function AppInner() {
       }
 
       if (cancelled) return;
-      setWorking(nextWorking);
+      // Don't block a tap that is already in progress.
+      React.startTransition(() => setWorking(nextWorking));
     };
 
     processWorkingState();
 
     return () => { cancelled = true; };
-  }, [supabase, company.id, company.timezone, tasklistsToday]);
+  }, [supabase, company.id, company.timezone, tasklistSyncKey, activeLocationId]);
 
   function getTaskMetaToday(tasklistId, taskId) {
     const tl = tasklistsToday.find((x) => x.id === tasklistId);
@@ -3648,7 +3723,15 @@ function AppInner() {
     const metaAny = tlAny?.tasks?.find(t => t.id === taskId);
     if (metaAny) return metaAny;
 
-    // 3) fallback
+    // 3) task removed from a checklist, or the checklist itself was deleted
+    for (const tpl of checklists.templates || []) {
+      const hit = (tpl.tasks || []).find(t => t.id === taskId);
+      if (hit) return hit;
+    }
+    const archived = (checklists.archivedTasks || []).find(t => t.id === taskId);
+    if (archived) return archived;
+
+    // 4) fallback
     return { id: taskId, title: taskId, inputType: "checkbox" };
   }
 
@@ -3661,6 +3744,12 @@ function AppInner() {
   }, []);
   const [employeeTab, setEmployeeTab] = useState('tasks');
   const [restockOpenCount, setRestockOpenCount] = useState(0);
+  const workingRef = useRef(working);
+  workingRef.current = working;
+  const companyRef = useRef(company);
+  companyRef.current = company;
+  const currentEmployeeRef = useRef(currentEmployee);
+  currentEmployeeRef.current = currentEmployee;
 
   // Manager submissions filtered by position (to reflect the same filter globally)
   const submissionsFilteredByPosition = useMemo(() => {
@@ -3674,15 +3763,18 @@ function AppInner() {
     });
   }, [submissions, checklists.templates, positionFilter]);
 
-  function updateTaskState(tlId, taskId, patch) {
+  const updateTaskState = useCallback((tlId, taskId, patch) => {
     setWorking((prev) => {
-      const next = { ...prev };
-      next[tlId] = next[tlId].map((ti) => (ti.taskId === taskId ? { ...ti, ...(typeof patch === "function" ? patch(ti) : patch) } : ti));
-      return next;
+      const list = prev[tlId];
+      if (!list) return prev;
+      return {
+        ...prev,
+        [tlId]: list.map((ti) => (ti.taskId === taskId ? { ...ti, ...(typeof patch === "function" ? patch(ti) : patch) } : ti)),
+      };
     });
-  }
-  const handleComplete = async (tasklist, task) => {
-    const st = working?.[tasklist.id]?.find((s) => s.taskId === task.id) ?? {};
+  }, []);
+  const handleComplete = useCallback(async (tasklist, task) => {
+    const st = workingRef.current?.[tasklist.id]?.find((s) => s.taskId === task.id) ?? {};
     if (!canTaskBeCompleted(task, st)) {
       alert('Finish required inputs first (photo/note/number in range).');
       return;
@@ -3691,59 +3783,66 @@ function AppInner() {
     setPinModal({
       open: true,
       onConfirm: async (pin) => {
+        const companyNow = companyRef.current;
         try {
           // 1) Validate PIN *per company* every time
-          const user = await validatePin({ supabase, companyId: company.id, pin });
+          const user = await validatePin({ supabase, companyId: companyNow.id, pin });
           if (!user) {
             return { ok: false, error: 'Wrong PIN. Please try again.' };
           }
 
-          // 2) Find/create submission for the correct period (weekly lists key off week-start)
-          const dateISO = submissionDateForTasklist(tasklist, todayISOInTz(company.timezone || 'UTC'));
-          const submissionId = await findOrCreateSubmission({
-            supabase,
-            companyId: company.id,
-            tasklistId: tasklist.id,
-            locationId: tasklist.locationId,
-            dateISO,
-          });
-
-          // 3) Map input to text (checkbox/number/text)
-          const valueText =
-            task.inputType === 'number' ? String(st.value ?? '')
-              : task.inputType === 'text' ? String(st.note ?? '')
-                : 'true';
-
-          // 4) Upsert and stamp submitted_by = PIN user.id (UUID)
-          await upsertSubmissionTask({
-            supabase,
-            submissionId,
-            taskId: task.id,
-            payload: {
-              status: 'Complete',
-              review_status: 'Pending',
-              na: !!st.na,
-              value: valueText || null,
-              note: st.note ?? null,
-              photos: Array.isArray(st.photos) ? st.photos : [],
-              submitted_by: user.id,
-            },
-          });
-
-          supabase.from('submission')
-            .update({ submitted_by: user.id })
-            .eq('id', submissionId)
-            .eq('company_id', company.id)
-            .then(() => {});
-
+          const previous = workingRef.current?.[tasklist.id];
           setWorking(prev => ({
             ...prev,
             [tasklist.id]: (prev[tasklist.id] ?? []).map(ti =>
-              ti.taskId === task.id ? { ...ti, status: 'Complete', reviewStatus: 'Pending' } : ti
+              ti.taskId === task.id ? { ...ti, status: 'Complete', reviewStatus: 'Pending', submittedBy: user.id } : ti
             ),
           }));
-
           setPinModal({ open: false, onConfirm: null });
+
+          try {
+            // 2) Find/create submission for the correct period (weekly lists key off week-start)
+            const dateISO = submissionDateForTasklist(tasklist, todayISOInTz(companyNow.timezone || 'UTC'));
+            const submissionId = await findOrCreateSubmission({
+              supabase,
+              companyId: companyNow.id,
+              tasklistId: tasklist.id,
+              locationId: tasklist.locationId,
+              dateISO,
+            });
+
+            // 3) Map input to text (checkbox/number/text)
+            const valueText =
+              task.inputType === 'number' ? String(st.value ?? '')
+                : task.inputType === 'text' ? String(st.note ?? '')
+                  : 'true';
+
+            // 4) Upsert and stamp submitted_by = PIN user.id (UUID)
+            await upsertSubmissionTask({
+              supabase,
+              submissionId,
+              taskId: task.id,
+              payload: {
+                status: 'Complete',
+                review_status: 'Pending',
+                na: !!st.na,
+                value: valueText || null,
+                note: st.note ?? null,
+                photos: Array.isArray(st.photos) ? st.photos : [],
+                submitted_by: user.id,
+              },
+            });
+
+            supabase.from('submission')
+              .update({ submitted_by: user.id })
+              .eq('id', submissionId)
+              .eq('company_id', companyNow.id)
+              .then(() => {});
+          } catch (e) {
+            console.error(e);
+            setWorking(prev => ({ ...prev, [tasklist.id]: previous ?? prev[tasklist.id] }));
+            alert(e.message || 'Failed to complete task. Please try again.');
+          }
           return { ok: true };
         } catch (e) {
           console.error(e);
@@ -3751,22 +3850,23 @@ function AppInner() {
         }
       },
     });
-  };
+  }, []);
 
-  const handleUpload = async (tasklist, task, file) => {
+  const handleUpload = useCallback(async (tasklist, task, file) => {
     try {
+      const companyNow = companyRef.current;
       const path = await uploadEvidence({
         supabase,
         bucket: 'evidence',
-        companyId: company.id,
+        companyId: companyNow.id,
         tasklistId: tasklist.id,
         taskId: task.id,
         file
       });
 
-      const dateISO = submissionDateForTasklist(tasklist, todayISOInTz(company.timezone || 'UTC'));
+      const dateISO = submissionDateForTasklist(tasklist, todayISOInTz(companyNow.timezone || 'UTC'));
       const submissionId = await findOrCreateSubmission({
-        supabase, companyId: company.id, tasklistId: tasklist.id, locationId: tasklist.locationId, dateISO
+        supabase, companyId: companyNow.id, tasklistId: tasklist.id, locationId: tasklist.locationId, dateISO
       });
 
       // Read current server photos for this task (optional; or trust client state)
@@ -3803,40 +3903,35 @@ function AppInner() {
       console.error(e);
       alert('Failed to upload photo');
     }
-  };
+  }, []);
 
 
-  function canSubmitTasklist(tl) {
-    const states = working[tl.id] ?? [];
-    for (const t of tl.tasks) {
+  const signoff = useCallback((tl) => {
+    const states = workingRef.current[tl.id] ?? [];
+    const ready = tl.tasks.every((t) => {
       const st = states.find((s) => s.taskId === t.id) || {};
-      const ok = (st.status === "Complete" || st.na) && canTaskBeCompleted(t, st);
-      if (!ok) return false;
-    }
-    return true;
-  }
-
-
-  function signoff(tl) {
-    if (!canSubmitTasklist(tl)) {
+      return (st.status === "Complete" || st.na) && canTaskBeCompleted(t, st);
+    });
+    if (!ready) {
       alert("Please complete all required tasks first.");
       return;
     }
     setPinModal({
       open: true,
       onConfirm: async (pin) => {
+        const companyNow = companyRef.current;
         try {
           // Validate PIN before submission
-          const user = await validatePin({ supabase, companyId: company.id, pin });
+          const user = await validatePin({ supabase, companyId: companyNow.id, pin });
           if (!user) {
             return { ok: false, error: 'Wrong PIN. Please try again.' };
           }
 
           // Persist the sign-off to the database so it survives refresh / overnight.
-          const dateISO = submissionDateForTasklist(tl, todayISOInTz(company.timezone || 'UTC'));
+          const dateISO = submissionDateForTasklist(tl, todayISOInTz(companyNow.timezone || 'UTC'));
           const submissionId = await findOrCreateSubmission({
             supabase,
-            companyId: company.id,
+            companyId: companyNow.id,
             tasklistId: tl.id,
             locationId: tl.locationId,
             dateISO,
@@ -3849,10 +3944,10 @@ function AppInner() {
               submitted_by: user.id,
             })
             .eq('id', submissionId)
-            .eq('company_id', company.id);
+            .eq('company_id', companyNow.id);
           if (signErr) throw signErr;
 
-          const payload = (working[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" }));
+          const payload = (workingRef.current[tl.id] ?? []).map((t) => ({ ...t, reviewStatus: "Pending" }));
           const submission = {
             id: submissionId,
             tasklistId: tl.id,
@@ -3861,7 +3956,7 @@ function AppInner() {
             date: dateISO,
             status: "Pending",
             signedBy: user.display_name || `PIN user`,
-            submittedBy: currentEmployee,
+            submittedBy: currentEmployeeRef.current,
             signedAt: new Date().toISOString(),
             tasks: payload,
           };
@@ -3880,7 +3975,7 @@ function AppInner() {
         }
       },
     });
-  }
+  }, []);
 
   // before the return, right after hooks:
 

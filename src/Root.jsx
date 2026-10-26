@@ -11,7 +11,9 @@ export default function Root() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [profileLoading, setProfileLoading] = useState(false);
+  // Which user the loaded profile belongs to. Token refreshes must not reset this.
+  const [profileUserId, setProfileUserId] = useState(null);
+  const userId = session?.user?.id ?? null;
 
   useEffect(() => {
     let mounted = true;
@@ -33,23 +35,29 @@ export default function Root() {
     };
   }, []);
 
-  // Load profile only when we have a session
+  // Reload the profile only when the signed-in user changes.
+  // A tab switch refreshes the access token and would otherwise unmount the app.
   useEffect(() => {
     let alive = true;
+    if (!userId) {
+      setProfile(null);
+      setProfileUserId(null);
+      return;
+    }
     (async () => {
-      if (!session) { setProfile(null); return; }
-      setProfileLoading(true);
       const { data, error } = await supabase
         .from("profile")
         .select("*")
-        .eq("id", session.user.id)
+        .eq("id", userId)
         .maybeSingle();
       if (!alive) return;
       setProfile(error ? null : data);
-      setProfileLoading(false);
+      setProfileUserId(userId);
     })();
     return () => { alive = false; };
-  }, [session]);
+  }, [userId]);
+
+  const profileReady = !userId || profileUserId === userId;
 
   if (loading) {
     return (
@@ -69,7 +77,7 @@ export default function Root() {
         <MantineProvider>
           <MarketingApp />
         </MantineProvider>
-      ) : profileLoading ? (
+      ) : !profileReady ? (
         <MantineProvider>
           <AppShell padding="md">
             <AppShell.Main>

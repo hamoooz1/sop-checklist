@@ -48,7 +48,9 @@ function useDebouncedUpdate(updateFn, delay = 500) {
 
 export default function AdminView({ companyId, refreshHeaderData, refreshCompanySettings, onReloadChecklists, employees }) {
 
-  const [view, setView] = useState("company");
+  const [view, setView] = useState(() => {
+    try { return sessionStorage.getItem("sop-admin-view") || "company"; } catch { return "company"; }
+  });
   const [draft, setDraft] = useState({
     company: { name: "", brandColor: "#0ea5e9", timezone: "UTC", weekStart: "Mon", locale: "en-US", logo: null, positions: [] },
     policies: { photoRetentionDays: 90, requireNoteForFoodSafety: true },
@@ -175,6 +177,10 @@ export default function AdminView({ companyId, refreshHeaderData, refreshCompany
     draft.company.positions,
   ]);
 
+
+  useEffect(() => {
+    try { sessionStorage.setItem("sop-admin-view", view); } catch { /* private mode */ }
+  }, [view]);
 
   const [navOpened, { open: openNav, close: closeNav, toggle: toggleNav }] = useDisclosure(false);
 
@@ -1052,14 +1058,47 @@ function ChecklistsPane({
   const [timeBlocks, setTimeBlocks] = useState([]);
   const [templates, setTemplates] = useState([]);
 
+  const draftKey = companyId ? `sop-tpl-draft:${companyId}` : null;
+
   // dialogs/drafts
   const [tbOpen, setTbOpen] = useState(false);
   const [tbDraft, setTbDraft] = useState(initTimeBlockDraft());
 
   const [createTplOpen, setCreateTplOpen] = useState(false);
   const [editTplOpen, setEditTplOpen] = useState(false);
-  const [tplDraft, setTplDraft] = useState(initTemplateDraft());
+  const [tplDraft, setTplDraft] = useState(initTemplateDraft);
   const [savingTpl, setSavingTpl] = useState(false);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+
+  // Company id arrives after the first paint. Restore once it is known,
+  // and don't clear storage before that or a reload wipes the open editor.
+  useEffect(() => {
+    if (!draftKey) return;
+    try {
+      const raw = sessionStorage.getItem(draftKey);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed?.draft) {
+        setTplDraft(parsed.draft);
+        setCreateTplOpen(parsed.mode === "create");
+        setEditTplOpen(parsed.mode === "edit");
+      }
+    } catch { /* ignore unreadable drafts */ }
+    setDraftHydrated(true);
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftKey || !draftHydrated) return;
+    if (!createTplOpen && !editTplOpen) {
+      sessionStorage.removeItem(draftKey);
+      return;
+    }
+    try {
+      sessionStorage.setItem(draftKey, JSON.stringify({
+        mode: createTplOpen ? "create" : "edit",
+        draft: tplDraft,
+      }));
+    } catch { /* private mode or quota */ }
+  }, [draftKey, draftHydrated, createTplOpen, editTplOpen, tplDraft]);
 
   // search state for positions MultiSelect (template dialog)
   const [posSearchTpl, setPosSearchTpl] = useState("");
@@ -1150,8 +1189,13 @@ function ChecklistsPane({
     await load();
   }
   async function removeTemplateDb(id) {
-    await deleteTasklistTemplate(id);
-    await load();
+    try {
+      await deleteTasklistTemplate(id);
+      await load();
+    } catch (e) {
+      console.error("Failed to delete checklist:", e);
+      alert(`Could not delete checklist: ${e?.message || e}`);
+    }
   }
 
   // --- task helpers (UI-only until saved)

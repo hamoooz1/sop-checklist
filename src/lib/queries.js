@@ -329,6 +329,45 @@ export async function listTasklistTemplates(companyId) {
   if (error) throw error;
   return data.map(toUiTemplate);
 }
+export async function listDetachedTasks(companyId) {
+  const cid = companyId || (await getMyCompanyId());
+  if (!cid) return [];
+  const { data, error } = await supabase
+    .from("tasklist_task")
+    .select("*")
+    .eq("company_id", cid)
+    .is("tasklist_id", null);
+  if (error) throw error;
+  return (data || []).map(toUiTask);
+}
+
+// Tasks that already appear on a submission cannot be deleted. Unlink them so
+// the checklist can change and the old submission still has a title.
+async function removeTasksKeepingHistory(taskIds) {
+  if (!taskIds.length) return;
+  const { data: referenced, error: refErr } = await supabase
+    .from("submission_task")
+    .select("task_id")
+    .in("task_id", taskIds);
+  if (refErr) throw refErr;
+
+  const referencedIds = [...new Set((referenced || []).map((row) => row.task_id))];
+  const referencedSet = new Set(referencedIds);
+  const deletable = taskIds.filter((id) => !referencedSet.has(id));
+
+  if (referencedIds.length) {
+    const { error } = await supabase
+      .from("tasklist_task")
+      .update({ tasklist_id: null })
+      .in("id", referencedIds);
+    if (error) throw error;
+  }
+  if (deletable.length) {
+    const { error } = await supabase.from("tasklist_task").delete().in("id", deletable);
+    if (error) throw error;
+  }
+}
+
 export async function deleteTasklistTemplate(id) {
   const { error } = await supabase.from("tasklist_template").delete().eq("id", id);
   if (error) throw error;
@@ -367,10 +406,7 @@ export async function upsertTasklistTemplateWithTasks(tplUi) {
   const existingIds = new Set((existing || []).map((t) => t.id));
   const incomingIds = new Set((tplUi.tasks || []).map((t) => t.id).filter(Boolean));
   const toDelete = [...existingIds].filter((id) => !incomingIds.has(id));
-  if (toDelete.length) {
-    const { error } = await supabase.from("tasklist_task").delete().in("id", toDelete);
-    if (error) throw error;
-  }
+  await removeTasksKeepingHistory(toDelete);
 
   const taskRows = (tplUi.tasks || []).map((t) => toDbTask(t, tasklist_id));
   if (taskRows.length) {
